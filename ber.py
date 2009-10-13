@@ -2,16 +2,13 @@
 
 from packetlib import *
 
-TagClass=Enum.mk("universal application ctx private",Byte)
-TagClass.__name__="TagClass"
+TagClass=Enum.mk("universal application ctx private",Byte,"TagClass")
 
-UniversalTag=Enum.mk("EOC BOOLEAN INTEGER BITSTRING OCTETSTRING NULL OBJECTID ObjDesc EXT REAL ENUM EMBED UTF8Str RELOID UKN14 UKN15 SEQ SET NumStr PrnStr T61Str VidStr IA5Str UTCTime GenTime GraphStr VisStr UnivStr CHARSTR BMPStr",Byte)
-UniversalTag.__name__="UniversalTag"
+UniversalTag=Enum.mk("EOC BOOLEAN INTEGER BITSTRING OCTETSTRING NULL OBJECTID ObjDesc EXT REAL ENUM EMBED UTF8Str RELOID UKN14 UKN15 SEQ SET NumStr PrnStr T61Str VidStr IA5Str UTCTime GenTime GraphStr VisStr UnivStr CHARSTR BMPStr",Byte,"UniversalTag")
 
-UnknownTag=Enum.mk("",Byte)
+UnknownTag=Enum.mk("",Byte,"UnknownTag")
 
-PrimConst=Enum.mk("P C",Byte)
-PrimConst.__name__="PrimConst"
+PrimComp=Enum.mk("Primval Compound",Byte,"PrimComp")
 
 class BERInt(IntVal):
 	def _init_parse(self,data,data_offset,data_size):
@@ -43,29 +40,36 @@ class BERInt(IntVal):
 	__slots__=[]
 
 class BERTypeField(Byte):
-	def get_pc(self): return PrimConst((self.value>>5)&1)
-	def set_pc(self,val): self.value=(self.value&0xdf) | (0x20 if val else 0)
-	def get_tc(self): return TagClass(self.value>>6)
-	def set_tc(self,val): self.value=(int(val)<<6) | (self.value&0x3f)
+	def get_compound(self): return PrimComp((self.value>>5)&1)
+	def set_compound(self,val): self.value=(self.value&0xdf) | (0x20 if val else 0)
+	def get_tagclass(self): return TagClass(self.value>>6)
+	def set_tagclass(self,val): self.value=(int(val)<<6) | (self.value&0x3f)
 	def get_tag(self): 
-		if self.tc.name=='universal': return UniversalTag(self.value&0x1f)
+		if self.tagclass.name=='universal': return UniversalTag(self.value&0x1f)
 		else: return UnknownTag(self.value&0x1f)
 	def set_tag(self,val): self.value=(self.value&0xe0) | int(val)
-	def _repr(self): return '%s %s %s'%(self.tc.name,self.pc._repr(),self.tag._repr())
+	def _repr(self): return '%s %s %s'%(self.tagclass.name,self.compound._repr(),self.tag._repr())
 	__slots__=[]
 	@classmethod
-	def mk(cls,tag,pc=0,tc=0):
+	def mk(cls,tag,compound=0,tagclass=0):
 		if type(tag) in (str,unicode): tag=UniversalTag(tag)
-		if type(tc) in (str,unicode): tc=TagClass(tc)
+		if type(tagclass) in (str,unicode): tagclass=TagClass(tagclass)
 		ret=cls(0)
-		ret.tag,ret.pc,ret.tc=tag,pc,tc
+		ret.tag,ret.compound,ret.tagclass=tag,compound,tagclass
 		return ret
 
 class BERPacket(BasePacketClass):
 	def choose_data(self,data,offset=None,size=None):
-		if self.tf.pc: return ArrayAttr._c(dtype=self.__class__)
+		if self.tf.compound: return ArrayAttr._c(dtype=self.__class__)
 		elif isinstance(self.tf.tag,Enum) and self.tf.tag.name in ("INTEGER","ENUM","BOOLEAN"): return BERInt
 		return StringSZ
 	_fields_=AttrList(('tf',BERTypeField),('data_size',BERInt),('data',choose_data))
 	def _repr(self): return self.tf._repr()
 	__slots__=_fields_.keys()
+
+class BERIntPrim(BERPacket):
+	__slots__=[]
+	def get_tf(self): return BERTypeField.mk("INTEGER")
+	def _init_new(self,data,*attrs,**kwattrs):
+		if type(data) in (int,long): self.data=data
+		else: BERPacket._init_new(self,data,*attrs,**kwattrs)
