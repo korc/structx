@@ -5,7 +5,7 @@ import sys
 
 max_uint=(sys.maxint<<1)+1
 
-version=(0,2,0,20090908)
+version=(0,2,0,20091116)
 
 class DataMismatchError(Exception): pass
 
@@ -15,7 +15,8 @@ def djoin(*dicts):
 	return ret
 
 def hashx(obj): return hash(obj)&max_uint
-def clsname(obj): return '%s.%s'%(obj.__class__.__module__,obj.__class__.__name__)
+#def clsname(obj): return '%s.%s'%(obj.__class__.__module__,obj.__class__.__name__)
+def clsname(obj): return obj.__class__.__name__
 
 def set_obj_attrtuple(obj,attrs,args):
 	for idx,val in enumerate(args):
@@ -56,10 +57,11 @@ class DynamicAttrClass(object):
 		Other arguments will be passed to _init_tuple function.
 		"""
 		self._init_args=args
-		#for k,v in args.iteritems(): setattr(self,k,v)
-		#self._init_args={}
+		for k,v in args.iteritems(): setattr(self,k,v)
+		self._init_args={}
 		if defarg: self._init_tuple(*defarg)
 	def __getattr__(self,key):
+		if _debug: print "__getattr__(%r)"%(key)
 		if not key.startswith('get_'):
 			if key in self._init_args:
 				setattr(self,key,self._init_args.pop(key))
@@ -350,20 +352,16 @@ class BasePacketClass(DynamicAttrClass):
 
 		ex: ethpkt.satisfies(data__dsap==0xaa)
 		"""
-		satisfy=True
 		for k,test in cond.iteritems():
 			tgt=self
 			for attr in k.split("__"):
 				try: tgt=getattr(tgt,attr)
 				except AttributeError,e:
-					satisfy=False
-					break
-			if not satisfy: break
+					return False
 			if tgt==test: pass
 			else:
-				satisfy=False
-				break
-		return satisfy
+				return False
+		return True
 	def as_structure(self):
 		"""Best to be used with pprint"""
 		ret=[]
@@ -413,7 +411,7 @@ class IntVal(BaseAttrClass):
 			raise ValueError,("Error unpacking %s"%(clsname(self)),e)
 	def __str__(self): return self.fmt.pack(self.value)
 	def _repr(self): return "0x%x"%(self.value)
-	def __len__(self): return self.fmt.size
+	def __len__(self): return self.size
 	def __mul__(self,other): return type(other)(self.value*other)
 	def __cmp__(self,other): return cmp(self.value,int(other))
 	def __nonzero__(self): return self.value!=0
@@ -440,6 +438,29 @@ class IntVal(BaseAttrClass):
 	def _inttype_attr(inttype):
 		if inttype is None: return {}
 		else: return {'fmt':inttype.fmt,'size':inttype.fmt.size}
+
+class IntValSZ(IntVal):
+	__slots__=['le']
+	le=True
+	def _init_parse(self,data,data_offset,data_size):
+		if data_size is None: data_size=self.size
+		mydata=data[data_offset:data_offset+data_size]
+		if not self.le: mydata=reversed(mydata)
+		self.value=sum([(ord(c)<<(idx<<3)) for idx,c in enumerate(mydata)])
+	def __len__(self):
+		try: return self.size
+		except AttributeError: pass
+		size=1
+		val=self.value
+		while val>>(8*size):
+			size+=1
+		return size
+	def __str__(self):
+		ret=[]
+		for idx in range(len(self)):
+			ret.append(chr((self.value>>(idx<<3))&0xff))
+		if not self.le: ret=reversed(ret)
+		return ''.join(ret)
 
 class Flags(IntVal):
 	"""

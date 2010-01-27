@@ -61,11 +61,12 @@ class BERTypeField(Byte):
 class BERPacket(BasePacketClass):
 	def choose_data(self,data,offset=None,size=None):
 		if self.tf.compound: return ArrayAttr._c(dtype=self.__class__)
-		elif isinstance(self.tf.tag,Enum) and self.tf.tag.name in ("INTEGER","ENUM","BOOLEAN"): return BERInt
+		elif isinstance(self.tf.tag,Enum) and self.tf.tag.name in ("INTEGER","ENUM","BOOLEAN"): return IntValSZ._c(le=False)
 		return StringSZ
 	_fields_=AttrList(('tf',BERTypeField),('data_size',BERInt),('data',choose_data))
 	def _repr(self): return self.tf._repr()
-	__slots__=_fields_.keys()
+	def get_size(self): return len(self.tf)+len(self.data_size)+int(self.data_size)
+	__slots__=_fields_.keys()+['size']
 
 class BERIntPrim(BERPacket):
 	__slots__=[]
