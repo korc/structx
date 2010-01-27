@@ -214,7 +214,7 @@ class ELF(BasePacketClass):
 		ret.header.shoff=ret.add_data(sects)
 		return ret
 
-def mksymonlyelf(symbols={}):
+def mksymonlyelf(symbols={},text_addr=0x08049b80,text_size=74780):
 	entry=0x8048000
 	ret=ELF(eclass="32bit",header=ELF32Header(etype="EXEC",machine="386",entry=entry,phoff=0,shoff=0,flags=0,ehsize=0x34,phentsize=0x20,phnum=0,shentsize=0x28,shnum=0,shstrndx=0),data='')
 	strtab=StringZTable.new([".text",".strtab",".symtab"]+symbols.keys())
@@ -225,7 +225,7 @@ def mksymonlyelf(symbols={}):
 		Elf32_Shdr.new(),
 		Elf32_Shdr.new_strtab(fileoff=ret.add_data(strtab),name=strtab.index(".strtab"),shsize=len(strtab)),
 		Elf32_Shdr.new_symtab(fileoff=ret.add_data(symtab),name=strtab.index(".symtab"),shsize=len(symtab),link=1),
-		Elf32_Shdr.new_text(fileoff=0,addr=0x08049b80,name=strtab.index(".text"),shsize=74780),
+		Elf32_Shdr.new_text(fileoff=0,addr=text_addr,name=strtab.index(".text"),shsize=text_size),
 		])
 	ret.header.shstrndx=1
 	ret.header.shoff=ret.add_data(sects)
