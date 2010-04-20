@@ -1,20 +1,22 @@
 #!/usr/bin/python
 
 import os,sys,imp
-import gtk,gtk.glade
+import gtk
 import packetlib
 
-class GladeUI(object):
-	def __init__(self,file,cbobj=None):
-		self._glade=gtk.glade.XML(file)
-		if cbobj!=None: self._glade.signal_autoconnect(cbobj)
+class GtkBuilderUI(object):
+	def __init__(self,filename,cbobj=None):
+		self._filename=filename
+		self._ui=gtk.Builder()
+		self._ui.add_from_file(filename)
+		if cbobj!=None: self._ui.connect_signals(cbobj)
 	def __getattr__(self,key):
 		if key[0]=='_': raise AttributeError,key
-		val=self._glade.get_widget(key)
+		val=self._ui.get_object(key)
 		if val!=None:
 			setattr(self,key,val)
 			return val
-		raise AttributeError,"No '"+key+"' attribute in "+str(self)
+		raise AttributeError,"No '"+key+"' attribute in "+str(self._filename)
 
 def _fmon(func):
 	print >>sys.stderr,"monitor %r"%(func.func_name)
@@ -143,7 +145,7 @@ class GtkUI(object):
 		if not key.startswith('_'): print >>sys.stderr,"No attribute: %s"%(key)
 		raise AttributeError,"No %r attribute"%(key)
 	def __init__(self):
-		self.ui=GladeUI(os.path.join(os.path.dirname(__file__),'gui.glade'),self)
+		self.ui=GtkBuilderUI(os.path.join(os.path.dirname(__file__),'gui.ui'),self)
 		self.pktstore=PacketTreeModel()
 		self.ui.pktree.set_model(self.pktstore)
 		self.ui.pktree.insert_column_with_attributes(-1,'Pkt',gtk.CellRendererText(),text=0)
