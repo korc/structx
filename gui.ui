@@ -2,6 +2,12 @@
 <interface>
   <requires lib="gtk+" version="2.16"/>
   <!-- interface-naming-policy toplevel-contextual -->
+  <object class="GtkListStore" id="pname_store">
+    <columns>
+      <!-- column-name name -->
+      <column type="gchararray"/>
+    </columns>
+  </object>
   <object class="GtkWindow" id="mainwin">
     <property name="visible">True</property>
     <accel-groups>
@@ -67,14 +73,32 @@
                 <property name="visible">True</property>
                 <property name="orientation">vertical</property>
                 <child>
-                  <object class="GtkEntry" id="pname">
+                  <object class="GtkHBox" id="hbox2">
                     <property name="visible">True</property>
-                    <property name="can_focus">True</property>
-                    <property name="tooltip_text" translatable="yes">Packet class</property>
-                    <signal name="activate" handler="on_pname_activate"/>
+                    <child>
+                      <object class="GtkFileChooserButton" id="pfile">
+                        <property name="visible">True</property>
+                        <signal name="file_set" handler="on_pfile_file_set"/>
+                      </object>
+                      <packing>
+                        <property name="position">0</property>
+                      </packing>
+                    </child>
+                    <child>
+                      <object class="GtkComboBoxEntry" id="pname">
+                        <property name="visible">True</property>
+                        <property name="model">pname_store</property>
+                        <property name="text_column">0</property>
+                        <signal name="changed" handler="on_pname"/>
+                      </object>
+                      <packing>
+                        <property name="position">1</property>
+                      </packing>
+                    </child>
                   </object>
                   <packing>
                     <property name="expand">False</property>
+                    <property name="fill">False</property>
                     <property name="position">0</property>
                   </packing>
                 </child>

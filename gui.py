@@ -152,6 +152,8 @@ class GtkUI(object):
 		self.ui.pktree.insert_column_with_attributes(-1,'Value',gtk.CellRendererText(),text=1)
 		self.ui.pktree.insert_column_with_attributes(-1,'Type',gtk.CellRendererText(),text=2)
 		self.reset()
+		self.module_load_count=0
+		self.imp_suffixes=dict([(x[0],x) for x in imp.get_suffixes()])
 	def reset(self):
 		self.pclass=None
 		self.data=None
@@ -166,7 +168,7 @@ class GtkUI(object):
 	def run(self):
 		self.ui.offsetentry.set_text(str(self.data_offset))
 		if self.pclass is not None:
-			self.ui.pname.set_text('%s.%s'%(self.pclass.__module__,self.pclass.__name__))
+			self.ui.pname.child.set_text(self.pclass.__name__)
 		gtk.main()
 	def on_new(self,*args): self.reset()
 	def on_mainwin_delete(self,*args): gtk.main_quit()
@@ -182,15 +184,24 @@ class GtkUI(object):
 		self.ui.dfchooser.set_filename(os.path.abspath(fname))
 		self.reload()
 	def set_pclass(self,clsname):
-		clsname=clsname.split('.')
-		modname='.'.join(clsname[:-1])
-		pmod=reload(imp.load_module(modname,*imp.find_module(modname)))
-		self.pclass=getattr(pmod,clsname[-1])
+		self.pclass=getattr(self.pmod,clsname)
 		self.reload()
-	def on_pname_activate(self,entry): self.set_pclass(entry.get_text())
+	def on_pname(self,entry): self.set_pclass(entry.child.get_text())
+	def load_pfile(self,fname):
+		self.pmod=imp.load_module("pmodule_%d"%self.module_load_count,open(fname),fname,self.imp_suffixes[fname[fname.rindex("."):]])
+		self.module_load_count+=1
+		self.ui.pname_store.clear()
+		for name in dir(self.pmod):
+			obj=getattr(self.pmod,name)
+			if type(obj)==type(packetlib.BasePacketClass) and issubclass(obj, packetlib.BasePacketClass) and obj is not packetlib.BasePacketClass:
+				self.ui.pname_store.append((obj.__name__,))
+	def on_pfile_file_set(self,fchooser): self.load_pfile(fchooser.get_filename())
 
 if __name__=='__main__':
 	ui=GtkUI()
-	if len(sys.argv)>1: ui.set_pclass(sys.argv[1])
+	if len(sys.argv)>1:
+		pfile,pclass=sys.argv[1].split(":")
+		ui.load_pfile(pfile)
+		ui.set_pclass(pclass)
 	if len(sys.argv)>2: ui.set_file(sys.argv[2])
 	ui.run()
