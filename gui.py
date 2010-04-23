@@ -28,6 +28,9 @@ def _fmon(func):
 		return ret
 	return f
 
+class DummyPacket(packetlib.BasePacketClass):
+	_fields_=packetlib.AttrList(("data",packetlib.StringSZ))
+
 class PacketTreeModel(gtk.GenericTreeModel):
 	packet=None
 	def on_get_flags(self): return 0
@@ -155,8 +158,9 @@ class GtkUI(object):
 		self.module_load_count=0
 		self.imp_suffixes=dict([(x[0],x) for x in imp.get_suffixes()])
 	def reset(self):
-		self.pclass=None
-		self.data=None
+		self.pclass=DummyPacket
+		self.pmod=None
+		self.data=""
 		self.data_offset=0
 		self.reload()
 	def reload(self):
@@ -167,7 +171,7 @@ class GtkUI(object):
 			self.pktstore.set_packet(None)
 	def run(self):
 		self.ui.offsetentry.set_text(str(self.data_offset))
-		if self.pclass is not None:
+		if self.pclass is not None and self.pmod is not None:
 			self.ui.pname.child.set_text(self.pclass.__name__)
 		gtk.main()
 	def on_new(self,*args): self.reset()
