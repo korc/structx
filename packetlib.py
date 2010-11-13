@@ -331,6 +331,15 @@ class BasePacketClass(DynamicAttrClass):
 		except AttributeError: pass
 		try: return self._data_size
 		except AttributeError: pass
+		size=0
+		for field in self._fields_.flow:
+			if type(field)==str:
+				size+=len(field)
+				continue
+			try: size+=field[1].size
+			except (AttributeError,TypeError):
+				size+=len(self[field[0]])
+		if size is not None: return size
 		return len(str(self))
 	def _repr(self): return ''
 	def __repr__(self): return '<%s@%x %s>'%(clsname(self),hashx(self),self._repr())
