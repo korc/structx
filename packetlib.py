@@ -646,18 +646,22 @@ class WStringSZ(StringSZ):
 		self.value=data[data_offset:data_offset+data_size].decode('utf-16-le')
 	def __str__(self): return self.value.encode('utf-16-le')
 
-class StringZ(StringSZ):
-	__slots__=[]
+class StringTOK(StringSZ):
+	__slots__=["token"]
 	def _init_new(self,data):
 		self.value=data
-		self.size=len(self.value)+1
+		self.size=len(self.value)+len(self.token)
 	def _init_parse(self,data,data_offset,data_size):
-		idx=data.index('\x00',data_offset)
+		idx=data.index(self.token,data_offset)
 		self.value=data[data_offset:idx]
-		self.size=idx-data_offset+1
+		self.size=idx-data_offset+len(self.token)
 		if data_size is not None and self.size!=data_size:
 			raise ValueError,"Specified data size %s does not match real size %s"(data_size,self.size)
-	def __str__(self): return '%s\x00'%self.value
+	def __str__(self): return '%s%s'%(self.value,self.token)
+
+class StringZ(StringTOK):
+	__slots__=[]
+	token="\x00"
 
 class WStringZ(StringSZ):
 	__slots__=[]
