@@ -1,6 +1,8 @@
 #!/usr/bin/python
 
-from packetlib import *
+from packetlib import BasePacketClass, Byte, StringSZ, ShortBE, IntBE, AttrList,\
+	ArrayAttr, Enum
+import socket
 
 DnsQueryType=Enum.mk('? A NS',ShortBE,PTR=0xc,SRV=0x21,TXT=0x10)
 
@@ -37,7 +39,7 @@ class DnsPtrString(StringSZ):
 				offset+=code
 		return '.'.join(ret)
 	def _repr(self,data=None,offset=0):
-	 	return repr(self.decode_name(self.value,0))
+		return repr(self.decode_name(self.value,0))
 
 class DnsRecTXT(BasePacketClass):
 	_fields_=AttrList(('txt_size',Byte),('txt',StringSZ))
