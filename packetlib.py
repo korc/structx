@@ -2,12 +2,17 @@
 
 import struct
 import sys
+import traceback
+from functools import wraps
+from warnings import warn
+from types import MemberDescriptorType
 
 max_uint=(sys.maxint<<1)+1
 
 version=(0,2,0,20091116)
 
 class DataMismatchError(Exception): pass
+class _AttrErr(AttributeError): pass
 
 def djoin(*dicts):
 	ret={}
@@ -15,7 +20,6 @@ def djoin(*dicts):
 	return ret
 
 def hashx(obj): return hash(obj)&max_uint
-#def clsname(obj): return '%s.%s'%(obj.__class__.__module__,obj.__class__.__name__)
 def clsname(obj): return obj.__class__.__name__
 
 def set_obj_attrtuple(obj,attrs,args):
@@ -34,6 +38,88 @@ def get_cls_size(cls):
 
 _debug=False
 
+def set_get_attr(obj, name, val):
+	setattr(obj, name, val)
+	return getattr(obj, name, val)
+
+def no_fail(f):
+	"""Wrapper for functions which are not allowed to raise exceptions.
+	Useful for functions whose AttributeError might get ignore otherwise.
+	raises RuntimeError in case of any exception
+	"""
+	@wraps(f)
+	def deco(*args,**kwargs):
+		try: return f(*args,**kwargs)
+		except Exception,e:
+			traceback.print_exc()
+			raise RuntimeError("Unhandled exception",f.__name__,e)
+	return deco
+
+class cached_property(object):
+	__slots__=["fget","fset","__name__","cls"]
+	def __init__(self, fget=None, fset=None, name=None,cls=None):
+		if fget is not None:
+			self.fget=fget
+			if name is not None: self.___name__=fget.__name__
+		elif name is not None:
+			self.__name__=name
+		if cls is not None: self.cls=cls
+		if fset is not None: self.fset=fset
+	def copy(self):
+		ret=self.__class__()
+		for k in "fset","fget","__name__":
+			try: v=getattr(self,k)
+			except AttributeError: pass
+			else: setattr(ret, k, v)
+		return ret
+	def __repr__(self): return "<%s %r>"%(self.__class__.__name__,getattr(self,"__name__","<noname>"))
+	def __get__(self, instance, owner):
+		try:
+			if instance is None: return self
+			name=self.__name__
+			print "cached_property: get %s.%s"%(instance.__class__.__name__,name)
+			try: return instance._property_cache[name]
+			except AttributeError: instance._property_cache={}
+			except KeyError: pass
+			try: fget=self.fget
+			except AttributeError:
+				raise _AttrErr(AttributeError("No getter for property %s.%s"%(instance.__class__.__name__,name)),sys.exc_info()[2])
+			print "Creating value for %s.%s using"%(instance.__class__.__name__,name),fget
+			try: val=self.fget(instance)
+			except AttributeError,e: raise _AttrErr(e,sys.exc_info()[2])
+			setattr(instance,name,val)
+			return val
+		except _AttrErr,e:
+			raise e[0],None,e[1]
+		except Exception,e:
+			traceback.print_exc()
+			raise RuntimeError("Error getting attribute",e)
+	@no_fail
+	def __set__(self, instance, value):
+		try: fset=self.fset
+		except AttributeError: pass
+		else:
+			possible_fset_setval=value is not None
+			value=fset(instance, value)
+			# we assume setter has set object properties appropriately
+			if possible_fset_setval and value is None: return
+		try: instance._property_cache[self.__name__]=value
+		except AttributeError:
+			try: instance._property_cache={self.__name__:value}
+			except Exception,e:
+				traceback.print_exc()
+				raise Exception("Exception when setting value:",e)
+	def __delete__(self, instance):
+		try: del instance._property_cache[self.__name__]
+		except (AttributeError,KeyError):
+			raise AttributeError("%r object has no attribute %r"%(instance.__class__.__name__,self.__name__))
+	def setter(self, fset):
+		self.fset=fset
+		return self
+	def getter(self, fget):
+		self.fget=fget
+		return self
+
 class DynamicAttrClass(object):
 	"""
 	Used to create dynamically changing attribute objects
@@ -51,6 +137,31 @@ class DynamicAttrClass(object):
 	"""
 	__slots__=['_tuple_attrs','_init_args']
 	_defaults={}
+	class __metaclass__(type):
+		def __init__(self, cls_name, bases, cls_dict):
+			print "DynamicAttrClass.__init__",self, cls_name, bases, cls_dict.keys()
+			for k,v in cls_dict.items():
+				if k.startswith("set_") or k.startswith("get_"):
+					t=k[:3]
+					k=k[4:]
+					print "%s has %s: self=%s, cls_dict=%s"%(cls_name,k,hasattr(self, k),k in cls_dict)
+					try: attr_v=getattr(self, k)
+					except AttributeError: attr_v=None
+					if attr_v is None or  isinstance(attr_v,MemberDescriptorType):
+						attr_v=cached_property(name=k, cls=self)
+					else:
+						if attr_v.cls is not self:
+							attr_v=attr_v.copy()
+					print "new attr_v:",attr_v,t,v
+					if t=="set": attr_v.setter(v)
+					elif t=="get": attr_v.getter(v)
+					else: raise RuntimeError("unknown key type",t)
+					setattr(self, k, attr_v)
+			return type.__init__(self, cls_name, bases, cls_dict)
+		def __new__(self, cls_name, bases, cls_dict):
+			print "DynamicAttrClass.__new__:",(cls_name,bases)
+			if "__slots__" in cls_dict: cls_dict["__slots__"].append("_property_cache")
+			return type.__new__(self, cls_name, bases, cls_dict)
 	def __init__(self,*defarg,**args):
 		"""
 		All keyword arguments will be assigned to object attributes.
@@ -60,41 +171,124 @@ class DynamicAttrClass(object):
 		for k,v in args.iteritems(): setattr(self,k,v)
 		self._init_args={}
 		if defarg: self._init_tuple(*defarg)
-	def __getattr__(self,key):
-		if _debug: print "__getattr__(%r)"%(key)
-		if not key.startswith('get_'):
-			if key in self._init_args:
-				setattr(self,key,self._init_args.pop(key))
-				return getattr(self,key)
-			try: getter=getattr(self,'get_%s'%(key))
-			except AttributeError,e:
-				if key!='_defaults' and key in self._defaults: return self._defaults[key]
-			else:
-				val=getter()
-				setattr(self,key,val)
-				try: val=object.__getattribute__(self,key)
-				except AttributeError: pass
-				if _debug: print "%s.__getattr__(%s)=%r"%(clsname(self),key,val)
-				return val
-		raise AttributeError,"%s has no %r attribute"%(clsname(self),key)
-	def __setattr__(self,key,val):
-		if not (key.startswith('_') or key.startswith('set_')):
-			try: setter=getattr(self,'set_%s'%(key))
-			except AttributeError:	object.__setattr__(self,key,val)
-			else: setter(val)
-		else: object.__setattr__(self,key,val)
 	@classmethod
 	def _c(cls,**attr):
 		"""Make a subclass of this class, setting additional attributes"""
-		return type('%s_g'%(cls.__name__),(cls,),dict(__slots__=cls.__slots__[:]+attr.keys(),**attr))
+		return type('%s_g'%(cls.__name__),(cls,),dict(__slots__=attr.keys(),**attr))
 	def _init_tuple(self,*args):
 		set_obj_attrtuple(self,self._tuple_attrs,args)
 
-class Attr(object):
-	__slots__=['name','index','default','atype','offset']
-	def __init__(self,name,atype):
-		self.name=name
-		self.atype=atype
+class Attr(cached_property):
+	__slots__=['name','index','default','type','offset',"const"]
+	def __init__(self,**attrs):
+		for k,v in attrs.iteritems(): setattr(self,k,v)
+	def copy(self):
+		ret=super(Attr, self).copy()
+		try: ret.name=self.name
+		except AttributeError: ret.const=self.const
+		else:
+			ret.type=self.type
+			try: ret.default=self.default
+			except AttributeError: pass
+		return ret
+	def __repr__(self): return "<%s %r>"%(self.__class__.__name__,getattr(self,"name",None))
+	def parse_value(self, instance):
+		offset=self.get_offset(instance)
+		parseargs=[instance._data,instance._data_offset+offset]
+		try: sz=self.__len__(instance)
+		except AttributeError:
+			try: data_size=instance._data_size
+			except AttributeError: pass
+			else:
+				if self.index==len(instance._fields_.flow)-1:
+					parseargs.append(data_size-offset)
+		else: parseargs.append(sz)
+		atype=self.choose_type(instance,*parseargs)
+		add_args={}
+		if issubclass(atype,ArrayAttr):
+			try: count=int(getattr(instance,"%s_count"%self.name))
+			except AttributeError: pass
+			else: add_args["count"]=count
+		if len(parseargs)==2:
+			sz=getattr(atype,"size",None)
+			if isinstance(sz,(int,long)):
+				parseargs.append(sz)
+		return atype(*parseargs,**add_args)
+	def get_offset(self,instance):
+		try: return instance._attr_offsets[self.index]
+		except KeyError: pass
+		try: offset=self.offset
+		except AttributeError:
+			try: offset=int(getattr(instance,"%s_offset"%self.name))
+			except AttributeError:
+				prev_attr=instance._fields_[self.index-1]
+				try: prev_size=prev_attr.__len__(instance)
+				except AttributeError: prev_size=len(prev_attr.get_value(instance))
+				offset=prev_attr.get_offset(instance)+prev_size
+		instance._attr_offsets[self.index]=offset
+		return offset
+	def get_value(self, instance):
+		try: name=self.name
+		except AttributeError: return self.const
+		print "getting field %s.%s"%(instance.__class__.__name__, name)
+		try: return instance._field_cache[name]
+		except AttributeError: instance._field_cache={}
+		except KeyError: pass
+		if hasattr(instance, "_data"):
+			return set_get_attr(instance, name, self.parse_value(instance))
+		try: return set_get_attr(instance, name, self.fget(instance))
+		except AttributeError:
+			try: return set_get_attr(instance, name, self.default)
+			except AttributeError:
+				raise _AttrErr(AttributeError("No default value for field attr %s.%s"%(instance.__class__.__name__,name)),sys.exc_info()[2])
+	def __get__(self, instance, owner):
+		if instance is None: return self
+		try: val=self.get_value(instance)
+		except _AttrErr,e: raise e[0],None,e[1]
+		except Exception,e:
+			traceback.print_exc()
+			raise RuntimeError("Exception when getting attribute",e)
+		else: return val
+	def choose_type(self, instance, *type_args):
+		print "Choosing type of %s.%s"%(instance.__class__.__name__,self.name)
+		atype=self.type
+		if isinstance(atype,list):
+			for test,res in atype:
+				if instance.satisfies(**test):
+					atype_new=res
+					break
+			atype=atype_new
+		if not isinstance(atype,type) and callable(atype):
+			atype=atype(instance,*type_args)
+		return atype
+	def __len__(self, instance=None):
+		if not hasattr(self, "name"): return len(self.const)
+		try: sz=self.type.size
+		except AttributeError: sz=None
+		if isinstance(sz,(int,long)): return sz
+		if instance is not None:
+			return int(getattr(instance,"%s_size"%self.name))
+		raise AttributeError("No size for field %r"%(self.name))
+	@no_fail
+	def __set__(self, instance, value):
+		try: fset=self.fset
+		except AttributeError: pass
+		else:
+			if not isinstance(value,(BaseAttrClass,BasePacketClass)):
+				value=fset(instance, value)
+			if value is None:
+				warn(DeprecationWarning("field setter %s.set_%s didn't return value"%(instance.__class__.__name__,self.name)))
+		if not isinstance(value,(BaseAttrClass,BasePacketClass)):
+			atype=self.choose_type(instance, value)
+			if not isinstance(value,atype):
+				value=atype(value)
+		try: cache=instance._field_cache
+		except AttributeError: cache=instance._field_cache={}
+		cache[self.name]=value
+	def __delete__(self, instance):
+		try: del instance._field_cache[self.name]
+		except (AttributeError,KeyError):
+			raise AttributeError("field %s.%s not set",instance.__class__.__name__, self.name)
 
 class AttrList(object):
 	"""
@@ -103,92 +297,65 @@ class AttrList(object):
 	Tries to pre-calculate offsets if initialized subobject types have size
 	attribute.
 	"""
-	__slots__=['types','index','flow','defaults','offsets','constants','size','names','attrs','name_index']
+	__slots__=['flow','size','names']
 	def __init__(self,*flow):
 		"""
 		Arguments will be parsed as list of: constant string or tuple
 		containing (name,type,default) values. default is optional.
 		"""
-		self.index={}
-		self.types={}
-		self.defaults={}
-		self.offsets={}
-		self.constants=[]
-		self.attrs=[]
-		self.names=[]
-		self.name_index={}
-		self.flow=flow
+		self.names={}
+		self.flow=[]
 		offset=0
-		for idx,adef in enumerate(self.flow):
-			if type(adef)==str:
+		for idx,adef in enumerate(flow):
+			if isinstance(adef,str):
+				attr=Attr(const=adef,index=idx)
+				self.flow.append(attr)
 				if offset is not None:
-					self.constants.append((offset,adef,idx))
+					attr.offset=offset
 					offset+=len(adef)
-			elif type(adef)==tuple:
+			elif isinstance(adef,tuple):
 				name,atype=adef[:2]
-				attr=Attr(name,atype)
-				self.name_index[name]=len(self.names)
-				self.names.append(name)
-				self.attrs.append(attr)
-				self.index[name]=idx
-				self.types[name]=atype
+				attr=Attr(name=name,type=atype,index=idx)
+				self.names[name]=attr
+				self.flow.append(attr)
+				if len(adef)>2: attr.default=adef[2]
 				if offset is not None:
-					self.offsets[name]=offset
-					try: asize=atype.size
+					attr.offset=offset
+					try: offset+=len(attr)
 					except AttributeError: offset=None
-					else:
-						if type(asize) in (int,long): offset+=asize
-						else: offset=None
-				if len(adef)>2: self.defaults[name]=adef[2]
 			else: raise ValueError,"Unknown attr type in flow: %r, need str or tuple"%(type(adef))
 		if offset is not None: self.size=offset
-	def is_last(self,name): return len(self.flow)==self.index[name]+1
-	def keys(self): return self.names
-	def __contains__(self,key): return key in self.index
+	def keys(self): return [a.name for a in self if hasattr(a,"name")]
+	def __getitem__(self, key):
+		if isinstance(key,(int,long)):
+			return self.flow[key]
+		else: return self.names[key]
+	def __contains__(self,key): return key in self.names
 	def validate(self,data,data_offset=0):
-		for offset,const,idx in self.constants:
-			datapart=data[data_offset+offset:data_offset+offset+len(const)]
-			if not datapart==const:
-				raise DataMismatchError,"Magic mismatch %r != %r"%(datapart,const)
+		for attr in self:
+			if hasattr(attr,"name"): continue
+			try: offset=attr.offset
+			except AttributeError: continue
+			datapart=data[data_offset+offset:data_offset+offset+len(attr)]
+			if not attr.const==datapart:
+				raise DataMismatchError("Magic mismatch %r != %r"%(datapart,attr))
 	def dup(self,**replace):
 		"""Make copy of attribute list, optionally replacing some elements with list of other definitions"""
 		newflow=[]
 		for attr in self.flow:
 			if type(attr)==str: newflow.append(attr)
 			else:
-				newattrs=replace.get(attr[0],attr)
-				if not type(newattrs)==list: newattrs=[newattrs]
-				for newattr in newattrs: newflow.append(newattr)
+				try: repl=replace[attr.name]
+				except KeyError:
+					try: default=attr.default
+					except AttributeError: newflow.append((attr.name,attr.type))
+					else: newflow.append((attr.name,attr.type,default))
+				else:
+					if isinstance(repl,list): newflow.extend(repl)
+					else: newflow.append(repl)
 		return self.__class__(*newflow)
-	@classmethod
-	def mk(cls,defstr,le=True,**dtypes):
-		flow=[]
-		for idx,tdef in enumerate(defstr.split()):
-			if tdef.startswith("\""):
-				flow.append(tdef[1:-1].decode("string_escape"))
-				continue
-			try: st=tdef.index(":")
-			except ValueError: name="ukn%d"%(idx)
-			else: name,tdef=tdef[:st],tdef[st+1:]
-
-			try: st=tdef.index("=")
-			except ValueError: defval=None
-			else: tdef,defval=tdef[:st],eval(tdef[st+1:])
-
-			try: st=tdef.index("{")
-			except ValueError: params=None
-			else:
-				en=tdef.index('}',st)
-				tdef,params=tdef[:st],tdef[st:en]
-			if tdef in dtypes: dtype=dtypes[tdef]
-			else: dtype=eval(tdef)
-			if params is not None:
-				dtype_params=eval("dict(%s)"%params)
-				dtype=dtype._c(dtype_params)
-			if defval is None: flow.append((name,dtype))
-			else: flow.append((name,dtype,defval))
-		return cls(*flow)
-
+	def __iter__(self):
+		for v in self.flow: yield v
 
 class BasePacketClass(DynamicAttrClass):
 	"""
@@ -215,6 +382,25 @@ class BasePacketClass(DynamicAttrClass):
 	_repr function can be overwritten to add info in __repr__
 	"""
 	__slots__=['_fields_','_data','_data_offset','_attr_offsets','_data_size']
+	class __metaclass__(DynamicAttrClass.__metaclass__):
+		def __init__(self, cls_name, bases, cls_dict):
+			try: fields=cls_dict["_fields_"]
+			except KeyError: pass
+			else:
+				for attr in fields:
+					attr.cls=self
+					try: name=attr.name
+					except AttributeError: pass
+					else:
+						setattr(self,name,attr)
+						if hasattr(self, "get_%s"%name): attr.fget=getattr(self, "get_%s"%name)
+						if hasattr(self, "set_%s"%name): attr.fset=getattr(self, "set_%s"%name)
+			return DynamicAttrClass.__metaclass__.__init__(self, cls_name, bases, cls_dict)
+		def __new__(self, cls_name, bases, cls_dict):
+			print "BaseAttrClass.__new__:",(cls_name,bases)
+			if "__slots__" in cls_dict: cls_dict["__slots__"].append("_field_cache")
+			return DynamicAttrClass.__metaclass__.__new__(self, cls_name, bases, cls_dict)
+
 	def _init_dup(self,data):
 		for attr_name in self.keys():
 			if attr_name not in self._init_args:
@@ -235,7 +421,7 @@ class BasePacketClass(DynamicAttrClass):
 		self._init_parse(data,offset,data_size)
 	def get__attr_offsets(self): return {}
 	def keys(self): return self._fields_.keys()
-	def __str__(self): return ''.join(map(lambda x: str(self[x]),xrange(len(self._fields_.flow))))
+	def __str__(self): return ''.join(map(lambda x: str(x.get_value(self)),self._fields_))
 	def __choose_atype_list(self,atype):
 		for test,res in atype:
 			if self.satisfies(**test): return res
@@ -273,57 +459,9 @@ class BasePacketClass(DynamicAttrClass):
 			if type(a)==str: return a
 			else: return getattr(self,a[0])
 		elif type(key) in (str,unicode): return getattr(self,key)
-		else: raise ValueError,"Key have to be string or integer"	
-	def __getattr__(self,key):
-		if _debug:
-			print "%s.__getattr__(%r)"%(clsname(self),key)
-		if not key.startswith('_') and key in self._fields_:
-			if key in self._init_args:
-				setattr(self,key,self._init_args.pop(key))
-				return getattr(self,key)
-			if hasattr(self,'_data'):
-				setattr(self,key,self.parse_attrval(key))
-				return getattr(self,key)
-			else:
-				if key in self._fields_.defaults:
-					setattr(self,key,self._fields_.defaults[key])
-					return getattr(self,key)
-				elif key.endswith('_size') and key[:-5] in self._fields_:
-					setattr(self,key,len(getattr(self,key[:-5])))
-					return getattr(self,key)
-				elif key.endswith('_count'):
-					orig=key[:-6]
-					if orig in self._fields_:
-						orig_type=self._fields_.types[orig]
-						if type(orig_type)==type and issubclass(orig_type,ArrayAttr):
-							try: count=getattr(self,orig).count
-							except AttributeError: pass
-							else:
-								setattr(self,key,count)
-								return getattr(self,key)
-		return DynamicAttrClass.__getattr__(self,key)
-	def _offsetof(self,name):
-		if name not in self._attr_offsets:
-			off=getattr(self,'%s_offset'%name,None)
-			if off is not None: self._attr_offsets[name]=off
-			elif name in self._fields_.offsets: self._attr_offsets[name]=self._fields_.offsets[name]
-			else:
-				previdx=self._fields_.index[name]-1
-				prevsize=0
-				while type(self._fields_.flow[previdx])==str:
-					prevsize+=len(self._fields_.flow[previdx])
-					previdx=previdx-1
-				prevname=self._fields_.flow[previdx][0]
-				self._attr_offsets[name]=prevsize+self._offsetof(prevname)+len(getattr(self,prevname))
-		return self._attr_offsets[name]
-	def __setattr__(self,key,val):
-		if key in self._fields_:
-			if not isinstance(val,(BaseAttrClass,BasePacketClass)):
-				atype=self._fields_.types[key]
-				if type(atype)==list: atype=self.__choose_atype_list(atype)
-				if type(atype)!=type and callable(atype): atype=atype(self,val)
-				if not isinstance(val,atype): val=atype(val)
-		DynamicAttrClass.__setattr__(self,key,val)
+		else: raise ValueError,"Key have to be string or integer"
+	def _offsetof(self, name):
+		return self._fields_[name].get_offset(self)
 	def __len__(self):
 		try: return self.size
 		except AttributeError: pass
@@ -536,7 +674,7 @@ class Flags(IntVal):
 		else: return IntVal.__setattr__(self,key,val)
 
 class Enum(IntVal):
-	__slots__=['enum','enum_rev','name']
+	__slots__=['enum','enum_rev']
 	fmt=struct.Struct('B')
 	size=fmt.size
 	def _init_new(self,data):
@@ -563,10 +701,6 @@ class Enum(IntVal):
 	def _repr(self): return self.name
 	def get_enum_rev(self): return dict([(y,x) for x,y in self.enum.iteritems()])
 	def get_name(self): return self.enum.get(self.value,'UKN 0x%x'%self.value)
-	def __getattr__(self,key):
-		if not (key.startswith('_') or key.startswith('set_') or key.startswith('get_')) and key!='enum_rev' and key in self.enum_rev:
-			return self.enum_rev[key]
-		return IntVal.__getattr__(self,key)
 
 class Byte(IntVal):
 	__slots__=[]
