@@ -503,7 +503,7 @@ class BasePacketClass(DynamicAttrClass):
 			tgt=self
 			for attr in k.split("__"):
 				try: tgt=getattr(tgt,attr)
-				except AttributeError,e:
+				except AttributeError:
 					return False
 			if tgt==test: pass
 			else:
@@ -681,10 +681,10 @@ class Enum(IntVal):
 		if type(data) in (str,unicode): data=self.enum_rev[data]
 		IntVal._init_new(self,data)
 	@classmethod
-	def mk(cls,enum,inttype=None,__name__=None,**names):
+	def mk(cls,enum,inttype=None,__name=None,**names):
 		enum,enum_rev=cls.mkenum2(enum,**names)
 		ret=cls._c(enum=enum,enum_rev=enum_rev,**IntVal._inttype_attr(inttype))
-		if __name__ is not None: ret.__name__=__name__
+		if __name is not None: ret.__name__=__name
 		return ret
 	@classmethod
 	def mkenum2(cls,enum={},**names):
@@ -925,5 +925,5 @@ class ArrayAttr(BaseAttrClass):
 		for item in self:
 			try: s=item.as_structure
 			except AttributeError: ret.append(item)
-			else: ret.append(item.as_structure())
+			else: ret.append(s)
 		return ret
