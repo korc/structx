@@ -77,15 +77,13 @@ class cached_property(object):
 		try:
 			if instance is None: return self
 			name=self.__name__
-			print "cached_property: get %s.%s"%(instance.__class__.__name__,name)
 			try: return instance._property_cache[name]
 			except AttributeError: instance._property_cache={}
 			except KeyError: pass
 			try: fget=self.fget
 			except AttributeError:
 				raise _AttrErr(AttributeError("No getter for property %s.%s"%(instance.__class__.__name__,name)),sys.exc_info()[2])
-			print "Creating value for %s.%s using"%(instance.__class__.__name__,name),fget
-			try: val=self.fget(instance)
+			try: val=fget(instance)
 			except AttributeError,e: raise _AttrErr(e,sys.exc_info()[2])
 			setattr(instance,name,val)
 			return val
@@ -138,12 +136,10 @@ class DynamicAttrClass(object):
 	_defaults={}
 	class __metaclass__(type):
 		def __init__(self, cls_name, bases, cls_dict):
-			print "DynamicAttrClass.__init__",self, cls_name, bases, cls_dict.keys()
 			for k,v in cls_dict.items():
 				if k.startswith("set_") or k.startswith("get_"):
 					t=k[:3]
 					k=k[4:]
-					print "%s has %s: self=%s, cls_dict=%s"%(cls_name,k,hasattr(self, k),k in cls_dict)
 					try: attr_v=getattr(self, k)
 					except AttributeError: attr_v=None
 					if attr_v is None or  isinstance(attr_v,MemberDescriptorType):
@@ -151,14 +147,12 @@ class DynamicAttrClass(object):
 					else:
 						if attr_v.cls is not self:
 							attr_v=attr_v.copy()
-					print "new attr_v:",attr_v,t,v
 					if t=="set": attr_v.setter(v)
 					elif t=="get": attr_v.getter(v)
 					else: raise RuntimeError("unknown key type",t)
 					setattr(self, k, attr_v)
 			return type.__init__(self, cls_name, bases, cls_dict)
 		def __new__(self, cls_name, bases, cls_dict):
-			print "DynamicAttrClass.__new__:",(cls_name,bases)
 			if "__slots__" in cls_dict: cls_dict["__slots__"].append("_property_cache")
 			return type.__new__(self, cls_name, bases, cls_dict)
 	def __init__(self,*defarg,**args):
@@ -229,7 +223,6 @@ class Attr(cached_property):
 	def get_value(self, instance):
 		try: name=self.name
 		except AttributeError: return self.const
-		print "getting field %s.%s"%(instance.__class__.__name__, name)
 		try: return instance._field_cache[name]
 		except AttributeError: instance._field_cache={}
 		except KeyError: pass
@@ -248,11 +241,9 @@ class Attr(cached_property):
 		try: val=self.get_value(instance)
 		except _AttrErr,e: raise e[0],None,e[1]
 		except Exception,e:
-			traceback.print_exc()
-			raise RuntimeError("Exception when getting attribute",e)
+			raise RuntimeError("Exception when getting attribute",e),None,sys.exc_info()[2]
 		else: return val
 	def choose_type(self, instance, *type_args):
-		print "Choosing type of %s.%s"%(instance.__class__.__name__,self.name)
 		atype=self.type
 		if isinstance(atype,list):
 			for test,res in atype:
@@ -276,10 +267,9 @@ class Attr(cached_property):
 		try: fset=self.fset
 		except AttributeError: pass
 		else:
-			if not isinstance(value,(BaseAttrClass,BasePacketClass)):
-				value=fset(instance, value)
+			value=fset(instance, value)
 			if value is None:
-				warn(DeprecationWarning("field setter %s.set_%s didn't return value"%(instance.__class__.__name__,self.name)))
+				warn(DeprecationWarning("field setter %s.set_%s should return new value"%(instance.__class__.__name__,self.name)))
 		if not isinstance(value,(BaseAttrClass,BasePacketClass)):
 			atype=self.choose_type(instance, value)
 			if not isinstance(value,atype):
@@ -399,7 +389,6 @@ class BasePacketClass(DynamicAttrClass):
 						if hasattr(self, "set_%s"%name): attr.fset=getattr(self, "set_%s"%name)
 			return DynamicAttrClass.__metaclass__.__init__(self, cls_name, bases, cls_dict)
 		def __new__(self, cls_name, bases, cls_dict):
-			print "BaseAttrClass.__new__:",(cls_name,bases)
 			if "__slots__" in cls_dict: cls_dict["__slots__"].append("_field_cache")
 			return DynamicAttrClass.__metaclass__.__new__(self, cls_name, bases, cls_dict)
 
@@ -423,7 +412,9 @@ class BasePacketClass(DynamicAttrClass):
 		self._init_parse(data,offset,data_size)
 	def get__attr_offsets(self): return {}
 	def keys(self): return self._fields_.keys()
-	def __str__(self): return ''.join(map(lambda x: str(x.get_value(self)),self._fields_))
+	def __str__(self):
+		try: return ''.join(map(lambda x: str(x.get_value(self)),self._fields_))
+		except _AttrErr,e: raise e[0],None,e[1]
 	def __getitem__(self,key):
 		if type(key) in (int,long):
 			a=self._fields_.flow[key]
