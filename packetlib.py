@@ -92,8 +92,7 @@ class cached_property(object):
 		except _AttrErr,e:
 			raise e[0],None,e[1]
 		except Exception,e:
-			traceback.print_exc()
-			raise RuntimeError("Error getting attribute",e)
+			raise RuntimeError("Error getting attribute",e),None,sys.exc_info()[2]
 	@no_fail
 	def __set__(self, instance, value):
 		try: fset=self.fset
@@ -238,6 +237,9 @@ class Attr(cached_property):
 			return set_get_attr(instance, name, self.parse_value(instance))
 		try: return set_get_attr(instance, name, self.fget(instance))
 		except AttributeError:
+			if name.endswith("_size"):
+				try: return set_get_attr(instance,name,len(getattr(instance,name[:-len("_size")])))
+				except AttributeError: pass
 			try: return set_get_attr(instance, name, self.default)
 			except AttributeError:
 				raise _AttrErr(AttributeError("No default value for field attr %s.%s"%(instance.__class__.__name__,name)),sys.exc_info()[2])
@@ -422,42 +424,11 @@ class BasePacketClass(DynamicAttrClass):
 	def get__attr_offsets(self): return {}
 	def keys(self): return self._fields_.keys()
 	def __str__(self): return ''.join(map(lambda x: str(x.get_value(self)),self._fields_))
-	def __choose_atype_list(self,atype):
-		for test,res in atype:
-			if self.satisfies(**test): return res
-	def parse_attrval(self,key,data=None,attr_offset=None):
-		if data is None: data=self._data
-		if attr_offset is None: attr_offset=self._offsetof(key)
-		parseargs=(data,attr_offset+self._data_offset)
-		initkwargs={}
-		if not key.endswith('_size'):
-			try: size=int(getattr(self,'%s_size'%(key,)))
-			except AttributeError:
-				try: data_size=self._data_size
-				except AttributeError: pass
-				else:
-					if self._fields_.is_last(key):
-						parseargs+=(data_size-attr_offset,)
-			else: parseargs+=(size,)
-		atype=self._fields_.types[key]
-		if type(atype)==list: atype=self.__choose_atype_list(atype)
-		if not type(atype)==type and callable(atype): atype=atype(self,*parseargs)
-		if issubclass(atype,ArrayAttr) and not key.endswith('_count'):
-			try: count=int(getattr(self,'%s_count'%(key,)))
-			except AttributeError: pass
-			else: initkwargs['count']=count
-		if len(parseargs)==2:
-			try: size=atype.size
-			except AttributeError: pass
-			else:
-				if type(size) in (int,long):
-					parseargs+=(size,)
-		return atype(*parseargs,**initkwargs)
 	def __getitem__(self,key):
 		if type(key) in (int,long):
 			a=self._fields_.flow[key]
 			if type(a)==str: return a
-			else: return getattr(self,a[0])
+			else: return getattr(self,a.name)
 		elif type(key) in (str,unicode): return getattr(self,key)
 		else: raise ValueError,"Key have to be string or integer"
 	def _offsetof(self, name):
@@ -474,9 +445,9 @@ class BasePacketClass(DynamicAttrClass):
 			if type(field)==str:
 				size+=len(field)
 				continue
-			try: size+=field[1].size
+			try: size+=len(field)
 			except (AttributeError,TypeError):
-				size+=len(self[field[0]])
+				size+=len(self[field.name])
 		if size is not None: return size
 		return len(str(self))
 	def _repr(self): return ''
@@ -858,8 +829,8 @@ class ArrayAttr(BaseAttrClass):
 		try: return self._dlist
 		except AttributeError: return [x for x in self]
 	def set_dlist(self,dlist):
-		object.__setattr__(self,'dlist',dlist)
 		self._dlist=dlist
+		return dlist
 	def __iter__(self):
 		try: dlist=self._dlist
 		except AttributeError:
