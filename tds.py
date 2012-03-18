@@ -4,7 +4,7 @@ from packetlib import *
 
 TDSPktType=Enum.mk("? Query Login ? Response",Byte,"TDSPktType",TDS78=0x12)
 TDSPktStatus=Enum.mk("Last NotLast",Byte,"TDSPktStatus")
-TDSTknType=Enum.mk("",Byte,"TDSTknType",EnvChange=0xe3,0xab=InfoMsg,LoginAck=0xad,Done=0xfd)
+TDSTknType=Enum.mk("",Byte,"TDSTknType",EnvChange=0xe3,InfoMsg=0xab,LoginAck=0xad,Done=0xfd)
 
 class TDSToken(BasePacketClass):
 	_fields_=AttrList(('tokentype',TDSTknType),('tokenlen',Short),('data',StringSZ))
