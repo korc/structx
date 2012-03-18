@@ -896,5 +896,5 @@ class ArrayAttr(BaseAttrClass):
 		for item in self:
 			try: s=item.as_structure
 			except AttributeError: ret.append(item)
-			else: ret.append(s)
+			else: ret.append(s())
 		return ret
