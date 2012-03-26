@@ -6,6 +6,7 @@ import traceback
 from functools import wraps
 from warnings import warn
 from types import MemberDescriptorType
+import os
 
 max_uint=(sys.maxint<<1)+1
 
@@ -19,7 +20,7 @@ def djoin(*dicts):
 	for d in dicts: ret.update(d)
 	return ret
 
-def hashx(obj): return hash(obj)&max_uint
+def hashx(obj): return id(obj)&max_uint
 def clsname(obj): return obj.__class__.__name__
 
 def set_obj_attrtuple(obj,attrs,args):
@@ -36,9 +37,12 @@ def get_cls_size(cls):
 	if type(size) not in (int,long): size=None
 	return size
 
-_debug=False
+_debug="DEBUG_PACKETLIB" in os.environ
 
 def set_get_attr(obj, name, val):
+	if _debug:
+		print "set_get %s.%s"%(obj.__class__.__name__,name)
+		traceback.print_stack()
 	setattr(obj, name, val)
 	return getattr(obj, name, val)
 
@@ -51,18 +55,16 @@ def no_fail(f):
 	def deco(*args,**kwargs):
 		try: return f(*args,**kwargs)
 		except Exception,e:
-			traceback.print_exc()
-			raise RuntimeError("Unhandled exception",f.__name__,e)
+			raise RuntimeError("Unhandled exception",f.__name__,e),None,sys.exc_info()[2]
 	return deco
 
 class cached_property(object):
-	__slots__=["fget","fset","__name__","cls"]
+	__slots__=["fget","fset","__name__","cls","default"]
 	def __init__(self, fget=None, fset=None, name=None,cls=None):
 		if fget is not None:
 			self.fget=fget
-			if name is not None: self.___name__=fget.__name__
-		elif name is not None:
-			self.__name__=name
+		if name is not None: self.__name__=name
+		elif fget is not None: self.__name__=fget.__name__
 		if cls is not None: self.cls=cls
 		if fset is not None: self.fset=fset
 	def copy(self):
@@ -73,39 +75,38 @@ class cached_property(object):
 			else: setattr(ret, k, v)
 		return ret
 	def __repr__(self): return "<%s %r>"%(self.__class__.__name__,getattr(self,"__name__","<noname>"))
+	def _set_with_setter(self, instance, value, none_nosave=True):
+		try: fset=self.fset
+		except AttributeError: pass
+		else:
+			value_new=fset(instance, value)
+			if value_new is not None: value=value_new
+			elif none_nosave: return
+		try: instance._property_cache[self.__name__]=value
+		except AttributeError: instance._property_cache={self.__name__:value}
+		return value
 	def __get__(self, instance, owner):
 		try:
 			if instance is None: return self
-			name=self.__name__
-			try: return instance._property_cache[name]
+			try: return instance._property_cache[self.__name__]
 			except AttributeError: instance._property_cache={}
 			except KeyError: pass
 			try: fget=self.fget
 			except AttributeError:
-				raise _AttrErr(AttributeError("No getter for property %s.%s"%(instance.__class__.__name__,name)),sys.exc_info()[2])
-			try: val=fget(instance)
-			except AttributeError,e: raise _AttrErr(e,sys.exc_info()[2])
-			setattr(instance,name,val)
-			return val
+				try: val=self.default
+				except AttributeError:
+					raise _AttrErr(AttributeError("No default for property %s.%s"%(instance.__class__.__name__,self.__name__)),sys.exc_info()[2])
+			else:
+				try: val=fget(instance)
+				except AttributeError,e: raise _AttrErr(e,sys.exc_info()[2])
+			return self._set_with_setter(instance, val, none_nosave=False)
 		except _AttrErr,e:
 			raise e[0],None,e[1]
 		except Exception,e:
 			raise RuntimeError("Error getting attribute",e),None,sys.exc_info()[2]
 	@no_fail
 	def __set__(self, instance, value):
-		try: fset=self.fset
-		except AttributeError: pass
-		else:
-			possible_fset_setval=value is not None
-			value=fset(instance, value)
-			# we assume setter has set object properties appropriately
-			if possible_fset_setval and value is None: return
-		try: instance._property_cache[self.__name__]=value
-		except AttributeError:
-			try: instance._property_cache={self.__name__:value}
-			except Exception,e:
-				traceback.print_exc()
-				raise Exception("Exception when setting value:",e)
+		self._set_with_setter(instance, value, none_nosave=True)
 	def __delete__(self, instance):
 		try: del instance._property_cache[self.__name__]
 		except (AttributeError,KeyError):
@@ -135,33 +136,45 @@ class DynamicAttrClass(object):
 	__slots__=['_tuple_attrs','_init_args']
 	_defaults={}
 	class __metaclass__(type):
+		def set_attr(self, cls, key, val, keytype=None):
+			try: attr_v=getattr(cls, key)
+			except AttributeError: attr_v=None
+			if attr_v is None or isinstance(attr_v,MemberDescriptorType):
+				attr_v=cached_property(name=key, cls=cls)
+			else:
+				if attr_v.cls is not cls:
+					attr_v=attr_v.copy()
+			if keytype=="set": attr_v.setter(val)
+			elif keytype=="get": attr_v.getter(val)
+			elif keytype=="default": attr_v.default=val
+			else: raise RuntimeError("unknown key type",keytype)
+			setattr(cls, key, attr_v)
 		def __init__(self, cls_name, bases, cls_dict):
 			for k,v in cls_dict.items():
 				if k.startswith("set_") or k.startswith("get_"):
-					t=k[:3]
-					k=k[4:]
-					try: attr_v=getattr(self, k)
-					except AttributeError: attr_v=None
-					if attr_v is None or  isinstance(attr_v,MemberDescriptorType):
-						attr_v=cached_property(name=k, cls=self)
-					else:
-						if attr_v.cls is not self:
-							attr_v=attr_v.copy()
-					if t=="set": attr_v.setter(v)
-					elif t=="get": attr_v.getter(v)
-					else: raise RuntimeError("unknown key type",t)
-					setattr(self, k, attr_v)
+					self.set_attr(self, k[4:], v, k[:3])
+			try: defaults=self._defaults
+			except AttributeError: pass
+			else:
+				for k,v in defaults.iteritems():
+					self.set_attr(self, k, v, "default")
 			return type.__init__(self, cls_name, bases, cls_dict)
 		def __new__(self, cls_name, bases, cls_dict):
 			if "__slots__" in cls_dict: cls_dict["__slots__"].append("_property_cache")
 			return type.__new__(self, cls_name, bases, cls_dict)
+	def __sort_attr_arg_keys(self, key):
+		try: desc=getattr(self.__class__, key)
+		except AttributeError: return 0
+		if isinstance(desc,cached_property): return 2
+		else: return 1
 	def __init__(self,*defarg,**args):
 		"""
 		All keyword arguments will be assigned to object attributes.
 		Other arguments will be passed to _init_tuple function.
 		"""
 		self._init_args=args
-		for k,v in args.iteritems(): setattr(self,k,v)
+		for k in sorted(args.keys(),key=self.__sort_attr_arg_keys):
+			setattr(self,k,args[k])
 		self._init_args={}
 		if defarg: self._init_tuple(*defarg)
 	@classmethod
@@ -172,7 +185,7 @@ class DynamicAttrClass(object):
 		set_obj_attrtuple(self,self._tuple_attrs,args)
 
 class Attr(cached_property):
-	__slots__=['name','index','default','type','offset',"const"]
+	__slots__=['name','index','type','offset',"const"]
 	def __init__(self,**attrs):
 		for k,v in attrs.iteritems(): setattr(self,k,v)
 	def copy(self):
@@ -282,6 +295,13 @@ class Attr(cached_property):
 		except (AttributeError,KeyError):
 			raise AttributeError("field %s.%s not set",instance.__class__.__name__, self.name)
 
+class _AttrListDefaultsReplacement(object):
+	__slots__=["attrlist"]
+	def __init__(self, attrlist):
+		self.attrlist=attrlist
+	def __getitem__(self,key):
+		return self.attrlist[key].default	
+
 class AttrList(object):
 	"""
 	Used to generate list of subobject names, types and default values for
@@ -346,9 +366,10 @@ class AttrList(object):
 					if isinstance(repl,list): newflow.extend(repl)
 					else: newflow.append(repl)
 		return self.__class__(*newflow)
+	@property
+	def defaults(self): return _AttrListDefaultsReplacement(self)
 	def __iter__(self):
 		for v in self.flow: yield v
-
 class BasePacketClass(DynamicAttrClass):
 	"""
 	Base class for creating objects which consist of multiple sub-objects.
@@ -548,28 +569,41 @@ class IntVal(BaseAttrClass):
 		if inttype is None: return {}
 		else: return {'fmt':inttype.fmt,'size':inttype.fmt.size}
 
+class FreeSizeFormat(DynamicAttrClass):
+	__slots__=["le","size"]
+	_tuple_attrs=("size","le")
+	def __repr__(self): return "<%s.%s %d byte %s at 0x%x>"%(self.__class__.__module__,
+		self.__class__.__name__,self.size,"LE" if self.le else "BE",id(self))
+	def unpack_from(self, data, offset=0):
+		data=data[offset:offset+self.size]
+		if len(data)<self.size: raise ValueError("Not enough data to unpack",data,self.size)
+		if not self.le: data=reversed(data)
+		return (sum([(ord(c)<<(idx<<3)) for idx,c in enumerate(data)]),)
+	def unpack(self, data): return self.unpack_from(data, 0)
+	def pack(self, value):
+		if value>=(1<<(self.size<<3)):
+			raise ValueError("Too large value for size",self.size, value)
+		ret=[chr((value>>(idx<<3))&0xff) for idx in range(self.size)]
+		if not self.le: ret=reversed(ret)
+		return "".join(ret)
+
 class IntValSZ(IntVal):
 	__slots__=['le']
 	le=True
+	def get_size(self):
+		val=self.value
+		sz=0
+		while True:
+			sz+=1
+			val=val>>8
+			if not val: break
+		return sz
+	def get_fmt(self):
+		return FreeSizeFormat._c(size=property(lambda s: self.size),le=property(lambda s: self.le))()
 	def _init_parse(self,data,data_offset,data_size):
 		if data_size is None: data_size=self.size
-		mydata=data[data_offset:data_offset+data_size]
-		if not self.le: mydata=reversed(mydata)
-		self.value=sum([(ord(c)<<(idx<<3)) for idx,c in enumerate(mydata)])
-	def __len__(self):
-		try: return self.size
-		except AttributeError: pass
-		size=1
-		val=self.value
-		while val>>(8*size):
-			size+=1
-		return size
-	def __str__(self):
-		ret=[]
-		for idx in range(len(self)):
-			ret.append(chr((self.value>>(idx<<3))&0xff))
-		if not self.le: ret=reversed(ret)
-		return ''.join(ret)
+		else: self.size=data_size
+		return super(IntValSZ, self)._init_parse(data, data_offset, data_size)
 
 class Flags(IntVal):
 	"""
