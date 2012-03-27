@@ -14,6 +14,7 @@ version=(0,2,0,20091116)
 
 class DataMismatchError(Exception): pass
 class _AttrErr(AttributeError): pass
+class CyclicAttributeError(RuntimeError): pass
 
 def djoin(*dicts):
 	ret={}
@@ -60,6 +61,7 @@ def no_fail(f):
 
 class cached_property(object):
 	__slots__=["fget","fset","__name__","cls","default"]
+	__re_entrance={}
 	def __init__(self, fget=None, fset=None, name=None,cls=None):
 		if fget is not None:
 			self.fget=fget
@@ -88,20 +90,37 @@ class cached_property(object):
 	def __get__(self, instance, owner):
 		try:
 			if instance is None: return self
-			try: return instance._property_cache[self.__name__]
+			name=self.__name__
+			try: return instance._property_cache[name]
 			except AttributeError: instance._property_cache={}
 			except KeyError: pass
+			try: init_args=instance._init_args
+			except AttributeError: pass
+			else:
+				try: val=init_args[name]
+				except KeyError: pass
+				else:
+					return self._set_with_setter(instance, val, none_nosave=False)
+			reent_id=(instance.__class__.__name__,name,id(instance))
+			if reent_id in self.__re_entrance:
+				raise CyclicAttributeError("Cyclic attribute detected",map(lambda x: "<{0}.{1} at {2:#x}>".format(*x[0]),sorted(self.__re_entrance.items(),key=lambda x: x[1])))
+			self.__re_entrance[reent_id]=len(self.__re_entrance)
 			try: fget=self.fget
 			except AttributeError:
 				try: val=self.default
 				except AttributeError:
-					raise _AttrErr(AttributeError("No default for property %s.%s"%(instance.__class__.__name__,self.__name__)),sys.exc_info()[2])
+					raise _AttrErr(AttributeError("No default for property %s.%s"%(instance.__class__.__name__,name)),sys.exc_info()[2])
 			else:
 				try: val=fget(instance)
 				except AttributeError,e: raise _AttrErr(e,sys.exc_info()[2])
-			return self._set_with_setter(instance, val, none_nosave=False)
+			val=self._set_with_setter(instance, val, none_nosave=False)
+			del self.__re_entrance[reent_id]
+			return val
 		except _AttrErr,e:
 			raise e[0],None,e[1]
+		except CyclicAttributeError:
+			self.__re_entrance.clear()
+			raise
 		except Exception,e:
 			raise RuntimeError("Error getting attribute",e),None,sys.exc_info()[2]
 	@no_fail
