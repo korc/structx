@@ -36,6 +36,12 @@ class PropFieldsTestCase(unittest.TestCase):
         from ethernet import Ether
         e=Ether(self.ether_data)
         assert self.ether_data==str(e)
+    def testDNS(self):
+        import dns, ethernet
+        e=ethernet.Ether(self.ether_data)
+        dns_data=str(e.data.data.data)
+        d=dns.DnsPacket(dns_data)
+        assert str(d)==dns_data
     def testBasicClasses(self):
         a,b=A(),B()
         b.c=10
