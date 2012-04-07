@@ -470,8 +470,9 @@ class BasePacketClass(DynamicAttrClass):
 	def __getitem__(self,key):
 		if type(key) in (int,long):
 			a=self._fields_.flow[key]
-			if type(a)==str: return a
-			else: return getattr(self,a.name)
+			try: name=a.name
+			except AttributeError: return a.const
+			else: return getattr(self,name)
 		elif type(key) in (str,unicode): return getattr(self,key)
 		else: raise ValueError,"Key have to be string or integer"
 	def _offsetof(self, name):
@@ -775,7 +776,10 @@ class StringSZ(BaseAttrClass):
 		try: self.size=len(data)
 		except AttributeError: pass
 	def _init_parse(self,data,data_offset,data_size):
-		if data_size is None: data_size=self.size
+		if data_size is None:
+			try: data_size=self.size
+			except AttributeError:
+				data_size=len(data)-data_offset
 		elif hasattr(self,'size') and data_size<self.size:
 			raise DataMismatchError,"Not enough data to fill %d bytes"%(self.size)
 		else:
