@@ -99,7 +99,7 @@ class Elf32_Symtab(ArrayAttr):
 	def resolve_name(self,name):
 		if name not in self._names: 
 			while True:
-				if self._last_fidx>=len(self.dlist): raise ValueError,"Have no %s symbol"%(name)
+				if self._last_fidx>=self.count: raise ValueError,"Have no %s symbol"%(name)
 				curname=self.strtab.str_at(self[self._last_fidx].name)
 				self._names[curname]=self[self._last_fidx]
 				if curname==name: break
@@ -163,7 +163,7 @@ class ELF(BasePacketClass):
 		self.data="%s%s%s"%(data[:offset],newdata,data[offset+len(newdata):])
 		return offset+self.dofs
 	def get_pheaders(self):
-		return ArrayAttr._c(dtype=PHeader,count=self.header.phnum)(self.dstr,int(self.header.phoff)-self.dofs)
+		return ArrayAttr._c(dtype=PHeader,count=prop_ref(self,"header.phnum"))(self.dstr,int(self.header.phoff)-self.dofs)
 	def get_sects(self):
 		return ArrayAttr._c(dtype=Elf32_Shdr,count=self.header.shnum)(self.dstr,int(self.header.shoff)-self.dofs)
 	_fields_=AttrList('\x7fELF',('eclass',Enum.mk('? 32bit')),('dataenc',Byte,1),('version',Byte,1),('osabi',Byte,0),('abiver',Byte,0),('pad',StringSZ._c(size=7),'\x00'*7),('header',choose_header),('data',StringSZ))
@@ -199,7 +199,7 @@ class ELF(BasePacketClass):
 		strtab_ndx=self.sects.append(Elf32_Shdr.new_strtab(name=symstridx,fileoff=strtab_ofs,shsize=len(symtab.strtab)))
 		symtab_ndx=self.sects.append(Elf32_Shdr.new_symtab(name=strtabidx,fileoff=symtab_ofs,shsize=len(symtab),link=strtab_ndx))
 		self.header.shoff=self.add_data(self.sects)
-		self.header.shnum=len(self.sects.dlist)
+		self.header.shnum=self.sects.count
 	def only_symelf(self,symbols):
 		ret=ELF(eclass="32bit",header=ELF32Header(etype="EXEC",machine="386",entry=self.header.entry,phoff=0x34,shoff=0,flags=0,ehsize=0x34,phentsize=0x20,phnum=0,shentsize=0x28,shnum=4,shstrndx=1),data='')
 		strtab=StringZTable.new([".text",".strtab",".symtab",".shstrtab"])
