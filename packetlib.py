@@ -15,6 +15,7 @@ version=(0,2,0,20091116)
 class DataMismatchError(Exception): pass
 class _AttrErr(AttributeError): pass
 class CyclicAttributeError(RuntimeError): pass
+class AttributeGetterError(RuntimeError): pass
 
 def djoin(*dicts):
 	ret={}
@@ -39,6 +40,15 @@ def get_cls_size(cls):
 	return size
 
 _debug="DEBUG_PACKETLIB" in os.environ
+
+def prop_ref(obj, name):
+	name_map=[obj]+name.split(".")
+	def fget(self):
+		return reduce(lambda x,y: getattr(x,y),name_map)
+	def fset(self,val):
+		tgt_obj=reduce(lambda x,y: getattr(x,y),name_map[:-1])
+		return setattr(tgt_obj,name_map[-1],val)
+	return property(fget,fset)
 
 def set_get_attr(obj, name, val):
 	if _debug:
@@ -122,7 +132,9 @@ class cached_property(object):
 			self.__re_entrance.clear()
 			raise
 		except Exception,e:
-			raise RuntimeError("Error getting attribute",e),None,sys.exc_info()[2]
+			if isinstance(e, AttributeError):
+				e=AttributeGetterError("Error getting attribute",e)
+			raise e,None,sys.exc_info()[2]
 	@no_fail
 	def __set__(self, instance, value):
 		self._set_with_setter(instance, value, none_nosave=True)
