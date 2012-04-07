@@ -847,110 +847,120 @@ class WStringZ(StringSZ):
 	def __str__(self): return '%s\x00\x00'%self.value.encode('utf-16-le')
 
 class ArrayAttr(BaseAttrClass):
-	__slots__=['dtype','dlist','_dcache','end','count','_offsets','_data_size','_data','_data_offset','_dlist']
+	__slots__=['dtype','_dcache','end','_end_idx','_count','_offsets','_data_size','_data','_data_offset']
 	def _init_dup(self,other):
-		self.dlist=[]
-		for v in other.dlist:
-			if isinstance(v,(BaseAttrClass,BasePacketClass)): v=v.__class__(v)
-			self.dlist.append(v)
-		self.count=len(self.dlist)
+		self._dcache=dcache={}
+		for idx,val in enumerate(other):
+			dcache[idx]=val
 	def _init_new(self,data):
-		self.dlist=[]
-		for val in data:
-			atype=self.dtype
+		self._dcache=dcache={}
+		for idx,val in enumerate(data):
 			if not isinstance(val,(BaseAttrClass,BasePacketClass)):
+				atype=self.dtype
 				if type(atype)!=type and callable(atype): atype=atype(self,val)
 				if not isinstance(val,atype): val=atype(val)
-			self.dlist.append(val)
-		self.count=len(self.dlist)
+			dcache[idx]=val
 	def _init_parse(self,data,offset,size):
 		self._offsets={}
+		self._dcache={}
 		self._data=data
 		self._data_offset=offset
 		if size is not None: self._data_size=size
-		self._dcache={}
-	def _offsetof(self,nr):
-		if nr==0: return 0
-		if nr not in self._offsets:
+	def _offsetof(self,idx):
+		if idx==0:
+			return getattr(self,"_data_offset",0)
+		if idx not in self._offsets:
 			dtype_size=get_cls_size(self.dtype)
-			if dtype_size is not None: offset=dtype_size*nr
-			else: offset=self._offsetof(nr-1)+self._sizeof(nr-1)
-			self._offsets[nr]=offset
-		return self._offsets[nr]
-	def _sizeof(self,nr):
+			if dtype_size is not None: offset=dtype_size*idx
+			else: offset=self._offsetof(idx-1)+self._sizeof(idx-1)
+			self._offsets[idx]=offset
+		return self._offsets[idx]
+	def _sizeof(self,idx):
 		size=get_cls_size(self.dtype)
-		if size is None: size=len(self[nr])
+		if size is None: size=len(self[idx])
 		return size
 	def __len__(self):
-		try: count=len(self.dlist)
-		except AttributeError: count=self.count
-		return sum([self._sizeof(x) for x in range(count)])
-	def get_dlist(self):
-		try: return self._dlist
-		except AttributeError: return [x for x in self]
-	def set_dlist(self,dlist):
-		self._dlist=dlist
-		return dlist
+		if hasattr(self,"_data"):
+			count=self.count
+			if count==0: return 0
+			last_idx=self.count-1
+			return self._offsetof(last_idx)+self._sizeof(last_idx)
+		else:
+			return sum(map(self._sizeof,self._dcache))
+	@property
+	def count(self):
+		try: return self._count
+		except AttributeError: pass
+		if not hasattr(self,"_data"):
+			return max(self._dcache)+1
+		data_size=getattr(self,"_data_size",None)
+		dtype_size=get_cls_size(self.dtype)
+		if hasattr(self,"end"):
+			try: return self._end_idx+1
+			except AttributeError:
+				if data_size is None or dtype_size is None:
+					raise AttributeError("Have end, but not found it yet")
+		if data_size is None:
+			raise AttributeError("No data_size, no count")
+		if dtype_size is None:
+			raise AttributeError("No dtype_size, no count")
+		if data_size%dtype_size:
+			raise ValueError("Data type size does not fit into data size")
+		return data_size/dtype_size
+	@count.setter
+	def count(self, val):
+		self._count=val
 	def __iter__(self):
-		try: dlist=self._dlist
-		except AttributeError:
-			dlist=[]
-			try: count=self.count
-			except AttributeError:
-				try: end=self.end
-				except AttributeError:
-					try: data_size=self._data_size
-					except AttributeError: 
-						raise ValueError,"No criteria to determine end of the list"
-					else:
-						idx=0
-						while data_size>0:
-							data=self[idx]
-							dlist.append(data)
-							yield data
-							data_size-=len(data)
-							idx+=1
-						if data_size<0:
-							raise ValueError,"Data exceeds allowed size"
-						self._dlist=dlist
-				else:
-					idx=0
-					while True:
-						data=self[idx]
-						dlist.append(data)
-						yield data
-						if callable(end) and end(self,data): break
-						elif data==end: break
-						idx+=1
-					self._dlist=dlist
-			else: 
-				for x in xrange(count): yield self[x]
-		else:
-			for elem in dlist: yield elem
-	def __getitem__(self,nr):
+		idx=0
+		count=getattr(self,"count",None)
+		end=getattr(self,"end",None)
+		while True:
+			if count is not None and idx>=count: break
+			try: val=self[idx]
+			except IndexError: break
+			yield val
+			if end is not None:
+				count=getattr(self,"count",None)
+			idx+=1
+	def __setitem__(self, idx, val):
+		if not isinstance(idx,(int,long)):
+			raise TypeError("ArrayAttr indices must be integers, not %s"%(type(idx).__name__))
+		self._dcache[idx]=val
+	def is_end_val(self, val, end):
+		return (callable(end) and end(self,val)) or end==val
+	def __getitem__(self,idx):
+		if not isinstance(idx,(int,long)):
+			raise TypeError("ArrayAttr indices must be integers, not %s"%(type(idx).__name__))
+		if idx in self._dcache: return self._dcache[idx]
 		try: data=self._data
-		except AttributeError: return self.dlist[nr]
+		except AttributeError:
+			raise IndexError("Index[%d] not in cache and no data"%idx)
+		try: end=self.end
+		except AttributeError: end=None
 		else:
-			try: data_size=self._data_size
-			except AttributeError:
-				if nr>=self.count: raise IndexError,"Specified index is bigger than count"
-				data_size=None
-		if nr not in self._dcache:
-			size=get_cls_size(self.dtype)
-			data=self.dtype(data,self._data_offset+self._offsetof(nr),size)
-			if data_size is not None and self._offsetof(nr)+len(data) > data_size:
-				raise IndexError,"Specified index is out of data range"
-			self._dcache[nr]=data
-		return self._dcache[nr]
+			try: end_idx=self._end_idx
+			except AttributeError: pass
+			else:
+				if idx>end_idx:
+					raise IndexError("Index[%d] bigger than end_idx=%d"%(idx, end_idx))
+		offset=self._offsetof(idx)
+		if len(data)<=offset:
+			raise IndexError("Index[%d] computes to offset over data size"%idx)
+		self._dcache[idx]=val=self.dtype(data,offset,get_cls_size(self.dtype))
+		if end is not None and self.is_end_val(val, end):
+			self._end_idx=idx
+		return val
 	def append(self,item):
-		self.dlist.append(item)
-		return len(self.dlist)-1
+		idx=self.count
+		self[idx]=item
+		return idx
 	def _repr(self):
-		try: count=int(self.count)
-		except AttributeError: count=""
+		try: count=self.count
+		except AttributeError:
+			count="*end" if hasattr(self,"end") else ""
 		return '%s[%s]'%(self.dtype.__name__,count)
 	def __str__(self):
-		return ''.join([str(x) for x in self.dlist])
+		return ''.join(map(str,self))
 	def as_structure(self):
 		ret=[]
 		for item in self:
