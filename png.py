@@ -52,6 +52,14 @@ class Chunk(BasePacketClass):
 		elif self.code=='tIME': return TimeData
 		else: return StringSZ
 	def _repr(self): return str(self.code)
+	def get_code(self):
+		data=self.data
+		if isinstance(data, IHdrData): return "IHDR"
+		if isinstance(data, TextData): return "tEXt"
+		if isinstance(data, PhysData): return "pHYs"
+		if isinstance(data, TimeData): return "tIME"
+		if data=="": return "IEND"
+		return "IDAT"
 	def calc_crc(self): return calc_crc('%s%s'%(self.code,self.data))
 	def get_crc(self): return IntBE(self.calc_crc())
 	_fields_=AttrList(('data_size',IntBE),('code',StringSZ._c(size=4)), ('data',choose_data), ('crc',IntBE))
