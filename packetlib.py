@@ -24,6 +24,8 @@ def djoin(*dicts):
 
 def hashx(obj): return id(obj)&max_uint
 def clsname(obj): return obj.__class__.__name__
+def shrtn(s,maxlen=20):
+	return "%r%s"%(s[:maxlen],"" if len(s)<maxlen else "...")
 
 def set_obj_attrtuple(obj,attrs,args):
 	for idx,val in enumerate(args):
@@ -790,10 +792,11 @@ class StringSZ(BaseAttrClass):
 		try: return self.value.ljust(self.size,self.pad)
 		except AttributeError: return self.value
 	def _repr(self):
-		if hasattr(self,'value'):
-			try: return '%r +%d*%r'%(self.value,self.size-len(self.value),self.pad)
-			except AttributeError: return repr(self.value)
-		else: return '(none)'
+		try: value=self.value
+		except AttributeError: return '(none)'
+		else:
+			try: return '%s +%d*%r'%(shrtn(value),self.size-len(value),self.pad)
+			except AttributeError: return shrtn(value)
 	def __len__(self): return self.size
 	def __eq__(self,other): return self.value==other
 
