@@ -1,12 +1,14 @@
 #!/usr/bin/python
 
 import os,sys,imp
-import gtk
+os.environ["LC_CTYPE"]="en_US.utf8"
+import gtk, pango
 import packetlib
 from packetlib import BasePacketClass, DataMismatchError, BaseAttrClass,\
 	ArrayAttr
 import code
 import re
+
 
 def shrtn(s,maxlen=20):
 	return "%r%s"%(s[:20],"" if len(s)<20 else "...")
@@ -20,7 +22,7 @@ def to_hex(s):
 		if not line: continue
 		ret.append("%08x  %s  %s"%(idx*16,
 			" ".join(map(lambda c: "%02x"%ord(c), line))+"   "*(16-len(line)),
-			"".join(map(lambda c: c if not no_disp_re.match(c) else ".", line))))
+			"".join(map(lambda c: c if not no_disp_re.match(c) else u"\u00b7", line))))
 	return "\n".join(ret)
 
 class GtkBuilderUI(object):
@@ -133,7 +135,8 @@ class GtkUI(object):
 		self.reset()
 		self.module_load_count=0
 		self.imp_suffixes=dict([(x[0],x) for x in imp.get_suffixes()])
-		self.mono_tag=self.ui.info.get_buffer().create_tag(family="Monospace 10")
+		fontdesc = pango.FontDescription("Monospace 10")
+		self.ui.info.modify_font(fontdesc)
 	def reset(self):
 		self.pclass=DummyPacket
 		self.pmod=None
@@ -172,7 +175,6 @@ class GtkUI(object):
 		else:
 			buf.set_text(to_hex(str(self.ui.pktree.get_model().path_to_obj(cur_path))))
 			buf=self.ui.info.get_buffer()
-			buf.apply_tag(self.mono_tag,*buf.get_bounds())
 	def on_reload_pmod_clicked(self, btn):
 		exp=[]
 		self.ui.pktree.map_expanded_rows(lambda tv,path: exp.append(path))
