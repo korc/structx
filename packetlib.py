@@ -507,7 +507,7 @@ class BasePacketClass(DynamicAttrClass):
 	@classmethod
 	def register_atype(cls,attrname,atype):
 		"""Register a new attribute type for conditional (list) attribute types"""
-		cls._fields_.types[attrname].insert(0,atype)
+		getattr(cls,attrname).type.insert(0,atype)
 	def satisfies(self,**cond):
 		"""
 		Returns True if all conditions match or there are no conditions.

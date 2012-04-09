@@ -5,9 +5,23 @@ import gtk
 import packetlib
 from packetlib import BasePacketClass, DataMismatchError, BaseAttrClass,\
 	ArrayAttr
+import code
+import re
 
 def shrtn(s,maxlen=20):
 	return "%r%s"%(s[:20],"" if len(s)<20 else "...")
+
+to_hex_re=re.compile(r'([\s\S]{0,16})')
+no_disp_re=re.compile(r'[\x00-\x1f\x7f-\xff]')
+def to_hex(s):
+	ret=[]
+	for idx,match in enumerate(to_hex_re.finditer(s)):
+		line=match.group(0)
+		if not line: continue
+		ret.append("%08x  %s  %s"%(idx*16,
+			" ".join(map(lambda c: "%02x"%ord(c), line))+"   "*(16-len(line)),
+			"".join(map(lambda c: c if not no_disp_re.match(c) else ".", line))))
+	return "\n".join(ret)
 
 class GtkBuilderUI(object):
 	def __init__(self,filename,cbobj=None):
@@ -71,10 +85,11 @@ class PacketTreeModel(gtk.GenericTreeModel):
 			except AttributeError: return "const[%d]"%idx
 		elif colname=="repr":
 			obj=parent[idx]
-			if isinstance(obj,str): return "[%d]=%s"%(idx,shrtn(obj))
+			if isinstance(obj,str): return shrtn(obj)
 			return obj._repr()
 		elif colname=="type":
 			obj=parent[idx]
+			if isinstance(obj,str): return "%s[%d]"%(type(obj).__name__,len(obj))
 			return type(obj).__name__
 		raise NotImplementedError("on_get_value", (rowref,colname))
 	def on_iter_next(self, rowref):
@@ -112,12 +127,13 @@ class GtkUI(object):
 		raise AttributeError,"No %r attribute"%(key)
 	def __init__(self):
 		self.ui=GtkBuilderUI(os.path.join(os.path.dirname(__file__),'gui.ui'),self)
-		self.ui.pktree.insert_column_with_attributes(-1,'Pkt',gtk.CellRendererText(),text=0)
-		self.ui.pktree.insert_column_with_attributes(-1,'Value',gtk.CellRendererText(),text=1)
+		self.ui.pktree.insert_column_with_attributes(-1,'Name',gtk.CellRendererText(),text=0)
 		self.ui.pktree.insert_column_with_attributes(-1,'Type',gtk.CellRendererText(),text=2)
+		self.ui.pktree.insert_column_with_attributes(-1,'Value',gtk.CellRendererText(),text=1)
 		self.reset()
 		self.module_load_count=0
 		self.imp_suffixes=dict([(x[0],x) for x in imp.get_suffixes()])
+		self.mono_tag=self.ui.info.get_buffer().create_tag(family="Monospace 10")
 	def reset(self):
 		self.pclass=DummyPacket
 		self.pmod=None
@@ -139,6 +155,31 @@ class GtkUI(object):
 	def on_new(self,*args): self.reset()
 	def on_mainwin_delete(self,*args): gtk.main_quit()
 	def on_menu_quit_activate(self,*args): gtk.main_quit()
+	def on_cmd_activate(self, entry):
+		try: co=code.compile_command(entry.get_text())
+		except Exception,e:
+			print "Exception when compiling code:",e
+		else:
+			try:
+				if co is not None: exec co
+			except Exception,e:
+				print "Exception when running code:",e
+	def on_pktree_cursor_changed(self, tv):
+		cur_path,cur_col=tv.get_cursor()
+		buf=self.ui.info.get_buffer()
+		if cur_path is None:
+			buf.set_text("")
+		else:
+			buf.set_text(to_hex(str(self.ui.pktree.get_model().path_to_obj(cur_path))))
+			buf=self.ui.info.get_buffer()
+			buf.apply_tag(self.mono_tag,*buf.get_bounds())
+	def on_reload_pmod_clicked(self, btn):
+		exp=[]
+		self.ui.pktree.map_expanded_rows(lambda tv,path: exp.append(path))
+		self.load_pfile(self.parser_fname)
+		self.set_pclass(self.pclass.__name__)
+		for path in exp:
+			self.ui.pktree.expand_row(path, False)
 	def on_offsetentry_activate(self,entry):
 		self.data_offset=int(entry.get_text())
 		self.reload()
@@ -150,8 +191,9 @@ class GtkUI(object):
 		self.ui.dfchooser.set_filename(os.path.abspath(fname))
 		self.reload()
 	def set_pclass(self,clsname):
-		self.pclass=getattr(self.pmod,clsname)
-		self.reload()
+		try: self.pclass=getattr(self.pmod,clsname)
+		except AttributeError: self.ui.pktree.set_model(None)
+		else: self.reload()
 	def on_pname(self,entry): self.set_pclass(entry.child.get_text())
 	def load_pfile(self,fname):
 		self.pmod=imp.load_module("pmodule_%d"%self.module_load_count,open(fname),fname,self.imp_suffixes[fname[fname.rindex("."):]])
@@ -161,13 +203,15 @@ class GtkUI(object):
 			obj=getattr(self.pmod,name)
 			if type(obj)==type(packetlib.BasePacketClass) and issubclass(obj, packetlib.BasePacketClass) and obj is not packetlib.BasePacketClass:
 				self.ui.pname_store.append((obj.__name__,))
-	def on_pfile_file_set(self,fchooser): self.load_pfile(fchooser.get_filename())
+	def on_pfile_file_set(self,fchooser):
+		self.parser_fname=fchooser.get_filename()
+		self.load_pfile(self.parser_fname)
 
 if __name__=='__main__':
 	ui=GtkUI()
 	if len(sys.argv)>1:
-		pfile,pclass=sys.argv[1].split(":")
-		ui.load_pfile(pfile)
+		ui.parser_fname,pclass=sys.argv[1].split(":")
+		ui.load_pfile(ui.parser_fname)
 		ui.set_pclass(pclass)
 	if len(sys.argv)>2: ui.set_file(sys.argv[2])
 	import pdb
