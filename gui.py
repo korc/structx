@@ -13,18 +13,61 @@ import re
 def shrtn(s,maxlen=20):
 	return "%r%s"%(s[:20],"" if len(s)<20 else "...")
 
-to_hex_re=re.compile(r'([\s\S]{0,16})')
-no_disp_re=re.compile(r'[\x00-\x1f\x7f-\xff]')
-def to_hex(s):
-	ret=[]
-	for idx,match in enumerate(to_hex_re.finditer(s)):
-		line=match.group(0)
-		if not line: continue
-		ret.append("%08x  %s  %s"%(idx*16,
-			" ".join(map(lambda c: "%02x"%ord(c), line))+"   "*(16-len(line)),
-			"".join(map(lambda c: c if not no_disp_re.match(c) else u"\u00b7", line))))
-	return "\n".join(ret)
-
+class HexTextView(object):
+	to_hex_re=re.compile(r'([\s\S]{0,16})')
+	no_disp_re=re.compile(r'[\x00-\x1f\x7f-\xff]')
+	def __init__(self, offset_view, hex_view, ascii_view):
+		self.hex=hex_view.get_buffer()
+		self.offsets=offset_view.get_buffer()
+		self.ascii=ascii_view.get_buffer()
+		self.ascii.connect("mark-set",self.on_ascii_sel)
+		self.hex.connect("mark-set",self.on_hex_sel)
+		fontdesc = pango.FontDescription("Monospace 10")
+		self.rcstyle=hex_view.rc_get_style()
+		for buf in self.hex, self.ascii:
+			buf.create_tag("sel",
+				background_gdk=self.rcstyle.base[gtk.STATE_SELECTED],
+				foreground_gdk=self.rcstyle.fg[gtk.STATE_SELECTED],
+				)
+		for view in offset_view, hex_view, ascii_view:
+			view.modify_font(fontdesc)
+	def ascii_i2o(self, textiter):
+		return textiter.get_line()*16+textiter.get_line_offset()
+	def hex_o2i(self, ofs):
+		return self.hex.get_iter_at_line_offset(ofs/16,(ofs%16)*3)
+	def ascii_o2i(self, ofs):
+		return self.ascii.get_iter_at_line_offset(ofs/16,(ofs%16))
+	def hex_i2o(self, textiter):
+		return textiter.get_line()*16+(textiter.get_line_offset()+1)/3
+	def on_hex_sel(self, buf, textiter, mark):
+		if mark==buf.get_mark("insert"):
+			print "cursor moved:",self.hex_i2o(textiter)
+		sel_bounds=map(self.hex_i2o,buf.get_selection_bounds())
+		self.ascii.remove_tag_by_name("sel", *self.ascii.get_bounds())
+		if sel_bounds:
+			self.ascii.apply_tag_by_name("sel",*map(self.ascii_o2i,sel_bounds))
+	def on_ascii_sel(self, buf, textiter, mark):
+		sel_bounds=map(self.ascii_i2o,buf.get_selection_bounds())
+		self.hex.remove_tag_by_name("sel", *self.hex.get_bounds())
+		if sel_bounds:
+			self.hex.apply_tag_by_name("sel",*map(self.hex_o2i,sel_bounds))
+	def set_text(self, txt):
+		for buf in self.hex, self.offsets, self.ascii:
+			buf.set_text("")
+		nl=""
+		for offs,hexstr,ascii in self.iter_lines(txt):
+			self.offsets.insert_at_cursor("%s%08x"%(nl,offs))
+			self.hex.insert_at_cursor("%s%s"%(nl,hexstr))
+			self.ascii.insert_at_cursor("%s%s"%(nl,ascii))
+			if not nl: nl="\n"
+	def iter_lines(self, s):
+		for idx,match in enumerate(self.to_hex_re.finditer(s)):
+			line=match.group(0)
+			if not line: continue
+			yield (idx*16,
+				" ".join(map(lambda c: "%02x"%ord(c), line))+"   "*(16-len(line)),
+				"".join(map(lambda c: c if not self.no_disp_re.match(c) else u"\u00b7", line)))
+	
 class GtkBuilderUI(object):
 	def __init__(self,filename,cbobj=None):
 		self._filename=filename
@@ -135,8 +178,7 @@ class GtkUI(object):
 		self.reset()
 		self.module_load_count=0
 		self.imp_suffixes=dict([(x[0],x) for x in imp.get_suffixes()])
-		fontdesc = pango.FontDescription("Monospace 10")
-		self.ui.info.modify_font(fontdesc)
+		self.hexview=HexTextView(self.ui.info_offset, self.ui.info_hex, self.ui.info_ascii)
 	def reset(self):
 		self.pclass=DummyPacket
 		self.pmod=None
@@ -163,18 +205,17 @@ class GtkUI(object):
 		except Exception,e:
 			print "Exception when compiling code:",e
 		else:
+			print "Running:",entry.get_text()
 			try:
 				if co is not None: exec co
 			except Exception,e:
 				print "Exception when running code:",e
 	def on_pktree_cursor_changed(self, tv):
 		cur_path,cur_col=tv.get_cursor()
-		buf=self.ui.info.get_buffer()
 		if cur_path is None:
-			buf.set_text("")
+			self.hexview.set_text(None)
 		else:
-			buf.set_text(to_hex(str(self.ui.pktree.get_model().path_to_obj(cur_path))))
-			buf=self.ui.info.get_buffer()
+			self.hexview.set_text(str(self.ui.pktree.get_model().path_to_obj(cur_path)))
 	def on_reload_pmod_clicked(self, btn):
 		exp=[]
 		self.ui.pktree.map_expanded_rows(lambda tv,path: exp.append(path))
@@ -216,6 +257,6 @@ if __name__=='__main__':
 		ui.load_pfile(ui.parser_fname)
 		ui.set_pclass(pclass)
 	if len(sys.argv)>2: ui.set_file(sys.argv[2])
-	import pdb
-	sys.excepthook=lambda exctype, value, traceback: pdb.post_mortem(traceback if traceback else sys.exc_info()[2])
+	#import pdb
+	#sys.excepthook=lambda exctype, value, traceback: pdb.post_mortem(traceback if traceback else sys.exc_info()[2])
 	ui.run()
