@@ -5,7 +5,7 @@ os.environ["LC_CTYPE"]="en_US.utf8"
 import gtk, pango
 import packetlib
 from packetlib import BasePacketClass, DataMismatchError, BaseAttrClass,\
-	ArrayAttr
+	ArrayAttr, IntValSZ
 import code
 import re
 
@@ -24,13 +24,19 @@ class HexTextView(object):
 		self.hex.connect("mark-set",self.on_hex_sel)
 		fontdesc = pango.FontDescription("Monospace 10")
 		self.rcstyle=hex_view.rc_get_style()
+		for view in offset_view, hex_view, ascii_view:
+			view.modify_font(fontdesc)
+		self.init_tags_n_marks()
+	def init_tags_n_marks(self):
+		self.hex.create_tag("sz_end",background="#f00")
 		for buf in self.hex, self.ascii:
 			buf.create_tag("sel",
 				background_gdk=self.rcstyle.base[gtk.STATE_SELECTED],
 				foreground_gdk=self.rcstyle.fg[gtk.STATE_SELECTED],
 				)
-		for view in offset_view, hex_view, ascii_view:
-			view.modify_font(fontdesc)
+		ascii_start=self.ascii.get_bounds()[0]
+		self.sz_mark_le=self.ascii.create_mark(None, ascii_start, True)
+		self.sz_mark_be=self.ascii.create_mark(None, ascii_start, True)
 	def ascii_i2o(self, textiter):
 		return textiter.get_line()*16+textiter.get_line_offset()
 	def hex_o2i(self, ofs):
@@ -39,13 +45,33 @@ class HexTextView(object):
 		return self.ascii.get_iter_at_line_offset(ofs/16,(ofs%16))
 	def hex_i2o(self, textiter):
 		return textiter.get_line()*16+(textiter.get_line_offset()+1)/3
+	def show_sz_offsets(self, ofs_data, data_offset):
+		int_le=IntValSZ(ofs_data,0,len(ofs_data))
+		int_be=IntValSZ._c(le=False)(ofs_data,0,len(ofs_data))
+		hex_bounds=self.hex.get_bounds()
+		last_off=self.hex_i2o(hex_bounds[1])
+		self.hex.remove_tag_by_name("sz_end", *hex_bounds)
+		for mark,intval in (self.sz_mark_le,int_le.value), (self.sz_mark_be,int_be.value):
+			mark.set_visible(False)
+			size_off=data_offset+intval
+			if size_off<=last_off:
+				self.ascii.move_mark(mark,self.ascii_o2i(size_off))
+				mark.set_visible(True)
+				off_iter_en=self.hex_o2i(size_off)
+				off_iter_st=off_iter_en.copy()
+				if off_iter_st.backward_char():
+					self.hex.apply_tag_by_name("sz_end",off_iter_st,off_iter_en)
+				else:
+					print "Could not move iter backwards"
 	def on_hex_sel(self, buf, textiter, mark):
-		if mark==buf.get_mark("insert"):
-			print "cursor moved:",self.hex_i2o(textiter)
-		sel_bounds=map(self.hex_i2o,buf.get_selection_bounds())
+		sel_bounds=buf.get_selection_bounds()
 		self.ascii.remove_tag_by_name("sel", *self.ascii.get_bounds())
 		if sel_bounds:
-			self.ascii.apply_tag_by_name("sel",*map(self.ascii_o2i,sel_bounds))
+			sel_ofs=map(self.hex_i2o,sel_bounds)
+			self.ascii.apply_tag_by_name("sel",*map(self.ascii_o2i,sel_ofs))
+			sel_txt=self.hex.get_text(*sel_bounds).replace(" ","").replace("\n","")
+			if len(sel_txt)%2==0 and len(sel_txt)<=16:
+				self.show_sz_offsets(sel_txt.decode("hex"), sel_ofs[1])
 	def on_ascii_sel(self, buf, textiter, mark):
 		sel_bounds=map(self.ascii_i2o,buf.get_selection_bounds())
 		self.hex.remove_tag_by_name("sel", *self.hex.get_bounds())
