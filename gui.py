@@ -16,7 +16,7 @@ def shrtn(s,maxlen=20):
 class HexTextView(object):
 	to_hex_re=re.compile(r'([\s\S]{0,16})')
 	no_disp_re=re.compile(r'[\x00-\x1f\x7f-\xff]')
-	def __init__(self, offset_view, hex_view, ascii_view):
+	def __init__(self, offset_view, hex_view, ascii_view, sbar):
 		self.hex=hex_view.get_buffer()
 		self.offsets=offset_view.get_buffer()
 		self.ascii=ascii_view.get_buffer()
@@ -24,6 +24,9 @@ class HexTextView(object):
 		self.hex.connect("mark-set",self.on_hex_sel)
 		fontdesc = pango.FontDescription("Monospace 10")
 		self.rcstyle=hex_view.rc_get_style()
+		self.int_le=self.int_be=self.sel_ofs=None
+		self.sbar=sbar
+		self.sbar_ctx=sbar.get_context_id("hextext")
 		for view in offset_view, hex_view, ascii_view:
 			view.modify_font(fontdesc)
 		self.init_tags_n_marks()
@@ -45,13 +48,11 @@ class HexTextView(object):
 		return self.ascii.get_iter_at_line_offset(ofs/16,(ofs%16))
 	def hex_i2o(self, textiter):
 		return textiter.get_line()*16+(textiter.get_line_offset()+1)/3
-	def show_sz_offsets(self, ofs_data, data_offset):
-		int_le=IntValSZ(ofs_data,0,len(ofs_data))
-		int_be=IntValSZ._c(le=False)(ofs_data,0,len(ofs_data))
+	def show_sz_offsets(self, data_offset):
 		hex_bounds=self.hex.get_bounds()
 		last_off=self.hex_i2o(hex_bounds[1])
 		self.hex.remove_tag_by_name("sz_end", *hex_bounds)
-		for mark,intval in (self.sz_mark_le,int_le.value), (self.sz_mark_be,int_be.value):
+		for mark,intval in (self.sz_mark_le,self.int_le), (self.sz_mark_be,self.int_be):
 			mark.set_visible(False)
 			size_off=data_offset+intval
 			if size_off<=last_off:
@@ -63,15 +64,29 @@ class HexTextView(object):
 					self.hex.apply_tag_by_name("sz_end",off_iter_st,off_iter_en)
 				else:
 					print "Could not move iter backwards"
+	def update_sbar(self):
+		self.sbar.remove_all(self.sbar_ctx)
+		msg=[]
+		if self.sel_ofs:
+			msg.append("[{0}:{1}] [{0:#x}:{1:#x}]".format(*self.sel_ofs))
+		if self.int_le is not None: msg.append("LE:{0},{0:#x}".format(self.int_le))
+		if self.int_be is not None: msg.append("BE:{0},{0:#x}".format(self.int_be))
+		self.sbar.push(self.sbar_ctx, " ".join(msg))
 	def on_hex_sel(self, buf, textiter, mark):
 		sel_bounds=buf.get_selection_bounds()
 		self.ascii.remove_tag_by_name("sel", *self.ascii.get_bounds())
 		if sel_bounds:
-			sel_ofs=map(self.hex_i2o,sel_bounds)
-			self.ascii.apply_tag_by_name("sel",*map(self.ascii_o2i,sel_ofs))
+			self.sel_ofs=map(self.hex_i2o,sel_bounds)
+			self.ascii.apply_tag_by_name("sel",*map(self.ascii_o2i,self.sel_ofs))
 			sel_txt=self.hex.get_text(*sel_bounds).replace(" ","").replace("\n","")
 			if len(sel_txt)%2==0 and len(sel_txt)<=16:
-				self.show_sz_offsets(sel_txt.decode("hex"), sel_ofs[1])
+				int_data=sel_txt.decode("hex")
+				self.int_le=IntValSZ(int_data,0,len(int_data)).value
+				self.int_be=IntValSZ._c(le=False)(int_data,0,len(int_data)).value
+				self.show_sz_offsets(self.sel_ofs[1])
+			else:
+				self.int_le=self.int_be=None
+			self.update_sbar()
 	def on_ascii_sel(self, buf, textiter, mark):
 		sel_bounds=map(self.ascii_i2o,buf.get_selection_bounds())
 		self.hex.remove_tag_by_name("sel", *self.hex.get_bounds())
@@ -204,7 +219,7 @@ class GtkUI(object):
 		self.reset()
 		self.module_load_count=0
 		self.imp_suffixes=dict([(x[0],x) for x in imp.get_suffixes()])
-		self.hexview=HexTextView(self.ui.info_offset, self.ui.info_hex, self.ui.info_ascii)
+		self.hexview=HexTextView(self.ui.info_offset, self.ui.info_hex, self.ui.info_ascii, self.ui.hex_sbar)
 	def reset(self):
 		self.pclass=DummyPacket
 		self.pmod=None
