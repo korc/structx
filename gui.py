@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import os,sys,imp
+import inspect
 os.environ["LC_CTYPE"]="en_US.utf8"
 import gtk, pango
 import packetlib
@@ -251,6 +252,21 @@ class GtkUI(object):
 				if co is not None: exec co
 			except Exception,e:
 				print "Exception when running code:",e
+	def show_sourcefile(self, fname, linenr=0, sel_linenr=None):
+		buf=self.ui.src_text.get_buffer()
+		buf.set_text(open(fname).read())
+		buf.place_cursor(buf.get_iter_at_line(linenr))
+		if sel_linenr is not None:
+			buf.move_mark(buf.get_mark("selection_bound"),buf.get_iter_at_line(sel_linenr))
+		self.ui.src_text.scroll_to_mark(buf.get_insert(), 0, use_align=True, yalign=0.1)
+	def on_pktree_row_activated(self, tv, path, col):
+		cls=type(tv.get_model().path_to_obj(path))
+		try:
+			fname=inspect.getsourcefile(cls)
+			source_lines,linenr=inspect.getsourcelines(cls)
+		except Exception: return
+		if linenr>0: linenr-=1
+		self.show_sourcefile(fname, linenr, linenr+len(source_lines))
 	def on_pktree_cursor_changed(self, tv):
 		cur_path,cur_col=tv.get_cursor()
 		if cur_path is None:

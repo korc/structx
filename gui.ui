@@ -152,6 +152,7 @@
                         <property name="can_focus">True</property>
                         <property name="tooltip_text" translatable="yes">Packet structure</property>
                         <signal name="cursor-changed" handler="on_pktree_cursor_changed" swapped="no"/>
+                        <signal name="row-activated" handler="on_pktree_row_activated" swapped="no"/>
                       </object>
                     </child>
                   </object>
@@ -212,7 +213,7 @@
               </packing>
             </child>
             <child>
-              <object class="GtkNotebook" id="notebook1">
+              <object class="GtkNotebook" id="data_nb">
                 <property name="visible">True</property>
                 <property name="can_focus">True</property>
                 <child>
@@ -302,6 +303,34 @@
                     <property name="label" translatable="yes">Data</property>
                   </object>
                   <packing>
+                    <property name="tab_fill">False</property>
+                  </packing>
+                </child>
+                <child>
+                  <object class="GtkScrolledWindow" id="scrolledwindow3">
+                    <property name="visible">True</property>
+                    <property name="can_focus">True</property>
+                    <property name="hscrollbar_policy">automatic</property>
+                    <property name="vscrollbar_policy">automatic</property>
+                    <child>
+                      <object class="GtkTextView" id="src_text">
+                        <property name="visible">True</property>
+                        <property name="can_focus">True</property>
+                      </object>
+                    </child>
+                  </object>
+                  <packing>
+                    <property name="position">1</property>
+                  </packing>
+                </child>
+                <child type="tab">
+                  <object class="GtkLabel" id="label2">
+                    <property name="visible">True</property>
+                    <property name="can_focus">False</property>
+                    <property name="label" translatable="yes">Source</property>
+                  </object>
+                  <packing>
+                    <property name="position">1</property>
                     <property name="tab_fill">False</property>
                   </packing>
                 </child>
