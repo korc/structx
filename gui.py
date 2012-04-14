@@ -259,6 +259,7 @@ class GtkUI(object):
 		if sel_linenr is not None:
 			buf.move_mark(buf.get_mark("selection_bound"),buf.get_iter_at_line(sel_linenr))
 		self.ui.src_text.scroll_to_mark(buf.get_insert(), 0, use_align=True, yalign=0.1)
+		self.ui.src_label.set_text("Source: "+fname)
 	def on_pktree_row_activated(self, tv, path, col):
 		cls=type(tv.get_model().path_to_obj(path))
 		try:
