@@ -11,8 +11,9 @@ import code
 import re
 
 
-def shrtn(s,maxlen=20):
-	return "%r%s"%(s[:20],"" if len(s)<20 else "...")
+def shrtn(s,maxlen=20, offset=0):
+	en=offset+maxlen
+	return "%r%s"%(s[offset:en],"" if len(s)<en else "...")
 
 class HexTextView(object):
 	to_hex_re=re.compile(r'([\s\S]{0,16})')
@@ -269,12 +270,17 @@ class GtkUI(object):
 		if linenr>0: linenr-=1
 		self.show_sourcefile(fname, linenr, linenr+len(source_lines))
 	def on_pktree_cursor_changed(self, tv):
-		cur_path,cur_col=tv.get_cursor()
-		if cur_path is None:
-			self.hexview.set_text(None)
-		else:
-			self.hexview.set_text(str(self.ui.pktree.get_model().path_to_obj(cur_path)))
-	def on_reload_pmod_clicked(self, btn):
+		mdl,cur_iter=tv.get_selection().get_selected()
+		if cur_iter is None: return
+		d=mdl.path_to_obj(mdl.get_path(cur_iter))
+		if not isinstance(d,str):
+			try:
+				doff=d._data_offset
+				d=d._data[doff:doff+len(d)]
+			except AttributeError:
+				d=str(d)
+		self.hexview.set_text(d)
+	def on_reload_pmod_clicked(self, d):
 		exp=[]
 		self.ui.pktree.map_expanded_rows(lambda tv,path: exp.append(path))
 		self.load_pfile(self.parser_fname)

@@ -884,9 +884,16 @@ class ArrayAttr(BaseAttrClass):
 		return size
 	def __len__(self):
 		if hasattr(self,"_data"):
-			count=self.count
-			if count==0: return 0
-			last_idx=self.count-1
+			try: count=self.count
+			except AttributeError:
+				n=None
+				for idx,n in enumerate(self):
+					pass
+				if n is None: return 0
+				last_idx=idx
+			else:
+				if count==0: return 0
+				last_idx=self.count-1
 			return self._offsetof(last_idx)+self._sizeof(last_idx)
 		else:
 			return sum(map(self._sizeof,self._dcache))
