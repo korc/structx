@@ -884,6 +884,8 @@ class ArrayAttr(BaseAttrClass):
 		return size
 	def __len__(self):
 		if hasattr(self,"_data"):
+			try: return self._data_size
+			except AttributeError: pass
 			try: count=self.count
 			except AttributeError:
 				n=None

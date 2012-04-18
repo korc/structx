@@ -95,14 +95,14 @@ class HexTextView(object):
 		if sel_bounds:
 			self.hex.apply_tag_by_name("sel",*map(self.hex_o2i,sel_bounds))
 	def set_text(self, txt):
-		for buf in self.hex, self.offsets, self.ascii:
-			buf.set_text("")
-		nl=""
+		h,o,a=[],[],[]
 		for offs,hexstr,ascii in self.iter_lines(txt):
-			self.offsets.insert_at_cursor("%s%08x"%(nl,offs))
-			self.hex.insert_at_cursor("%s%s"%(nl,hexstr))
-			self.ascii.insert_at_cursor("%s%s"%(nl,ascii))
-			if not nl: nl="\n"
+			o.append("%08x"%offs)
+			h.append(hexstr)
+			a.append(ascii)
+		self.offsets.set_text("\n".join(o))
+		self.hex.set_text("\n".join(h))
+		self.ascii.set_text("\n".join(a))
 	def iter_lines(self, s):
 		for idx,match in enumerate(self.to_hex_re.finditer(s)):
 			line=match.group(0)
@@ -232,7 +232,9 @@ class GtkUI(object):
 		self.ui.offsetentry.set_text(str(self.data_offset))
 		self.ui.pktree.set_model(None)
 		if self.pclass is not None and self.data is not None:
-			try: packet=self.pclass(self.data,self.data_offset)
+			pkt_args=[self.data,self.data_offset]
+			if self.data_offset==0: pkt_args.append(len(self.data))
+			try: packet=self.pclass(*pkt_args)
 			except DataMismatchError: pass
 			else: self.ui.pktree.set_model(PacketTreeModel(packet))
 	def run(self):
