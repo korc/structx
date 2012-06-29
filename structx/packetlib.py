@@ -598,6 +598,27 @@ class IntVal(BaseAttrClass):
 		elif isinstance(other,IntVal): return self.value==other.value
 		else: return BaseAttrClass.__eq__(self,other)
 	def get_size(self): return self.fmt.size
+	def __getitem__(self, key):
+		if isinstance(key, slice):
+			st=key.start or 0
+			ret=self.value>>st
+			if key.stop is None: return ret
+			else: return ret&((1<<(key.stop-st))-1)
+		elif isinstance(key, (int,long)):
+			return True if self.value&(1<<key) else False
+		else: raise TypeError("Unknown key type", key)
+	def __setitem__(self, key, value):
+		if isinstance(key, slice):
+			st=key.start or 0
+			sz=((self.size*8) if key.stop is None else key.stop)-st
+			val_max=(1<<sz)-1
+			if value>val_max:
+				raise ValueError("Value too big", value, val_max)
+			self.value=~(~self.value|(val_max<<st))|(value<<st)
+		elif isinstance(key, (int,long)):
+			if value: self.value|=(1<<key)
+			else: self.value&=~(1<<key)
+		else: raise TypeError("Unknown key type", key)
 	@staticmethod
 	def _inttype_attr(inttype):
 		if inttype is None: return {}
