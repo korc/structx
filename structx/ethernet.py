@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
 from structx.packetlib import Byte, StringSZ, Enum, ShortBE, BasePacketClass, AttrList,\
-	Int, DynamicAttrClass, ArrayAttr, Short
+	Int, DynamicAttrClass, ArrayAttr, Short, IntBE, Flags
 import random
 from warnings import warn
 import struct
@@ -70,12 +70,38 @@ class UDP(BasePacketClass):
 				(ip.src,ip.dst,"\0",ip.proto,self.length,
 				self.sport,self.dport,self.length,self.data))))
 
+class TCP(BasePacketClass):
+	__slots__=['_parent_ip']
+	_fields_=AttrList(('sport', ShortBE),('dport', ShortBE),('seq', IntBE),('ack', IntBE),
+		('flags', Flags.mk('fin syn reset push ack urg ecn cwr ns', ShortBE)),
+		('window_size', ShortBE), ('cksum', ShortBE), ('urg_ptr', ShortBE, 0),
+		('options', StringSZ), ('data',[({},StringSZ)]))
+	@property
+	def hdr_len(self): return self.flags[12:]*4
+	def get_options_size(self):
+		return self.hdr_len-20
+	@hdr_len.setter
+	def hdr_len(self, v):
+		assert v%4==0
+		self.flags[12:]=v/4
+	def get_cksum(self):
+		try: ip=self._parent_ip
+		except AttributeError:
+			warn("TCP.cksum: no parent IP packet, will return 0")
+			return 0
+		return calc_cksum16("".join(map(str,
+			(ip.src, ip.dst, '\0', ip.proto,
+			ShortBE(int(self.hdr_len)+len(self.data)),
+			self.sport, self.dport, self.seq, self.ack, self.flags, self.window_size,
+			self.urg_ptr, self.options, self.data
+			))))
+
 class IPv4(BasePacketClass):
 	__slots__=[]
 	_fields_=AttrList(('ver_len',Byte),('dsf',Byte,0),('length',ShortBE),
 		('id',ShortBE),('frag_flags',ShortBE,0x4000),('ttl',Byte,64),('proto',IPProto),
 		('hdr_cksum',ShortBE),('src',IPAddr),('dst',IPAddr),
-		('options',StringSZ,''),('data',[({"proto":17},UDP),({},StringSZ)]))
+		('options',StringSZ,''),('data',[({"proto":17},UDP), ({"proto":6}, TCP), ({},StringSZ)]))
 	@property
 	def hdr_size(self): return (self.ver_len&0xf)*4
 	@property
