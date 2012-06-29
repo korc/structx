@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
-from packetlib import Byte, StringSZ, Enum, ShortBE, BasePacketClass, AttrList,\
-	Int, DynamicAttrClass
+from structx.packetlib import Byte, StringSZ, Enum, ShortBE, BasePacketClass, AttrList,\
+	Int, DynamicAttrClass, ArrayAttr, Short
 import random
 from warnings import warn
 import struct
@@ -132,6 +132,26 @@ class PktHandler(DynamicAttrClass):
 	def sr(self,data,**cond):
 		self.s(data)
 		return self.r(**cond)
+
+class PCapPacket(BasePacketClass):
+	__slots__=[]
+	dtype=StringSZ
+	def choose_dtype(self, data, offset=None, size=None):
+		return self.dtype
+	_fields_=AttrList(('ts_sec', Int), ('ts_usec', Int), ('data_size', Int), ('data_size_orig', Int), ('data', choose_dtype))
+	def _repr(self): return "%s %s bytes at %ss+%sms"%(int(self.data_size), type(self.data).__name__, int(self.ts_sec),int(self.ts_usec))
+
+PCapNetwork=Enum.mk("null ethernet", Int, ieee802_5=6, arcnet_bsd=7, slip=8, ppp=9, fddi=10, ppp_hdlc=50, ppp_ether=51, raw_ip=101, ieee802_11=105, loop=108, linux_sll=113, ieee802_15_4=195, ipv4=228, ipv6=229)
+
+class PCapFile(BasePacketClass):
+	__slots__=[]
+	def choose_pcap_packet(self,data,offset=None,size=None):
+		if self.network.name=='ethernet':
+			return ArrayAttr._c(dtype=PCapPacket._c(dtype=Ether))
+		else: return ArrayAttr._c(dtype=PCapPacket)
+	_fields_=AttrList(
+		('magic', Int, 0xa1b2c3d4), ('major', Short, 2), ('minor', Short, 4), ('thiszone', Int, 0), ('sigfigs', Int, 0), ('snaplen', Int), ('network', PCapNetwork, 1),
+		('data', choose_pcap_packet))
 
 def arp_spoof(ethsock,ip,mac=None):
 	if mac is None: mac=ethsock.sock.mac
