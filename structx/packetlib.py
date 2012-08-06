@@ -207,7 +207,8 @@ class DynamicAttrClass(object):
 		"""
 		self._init_args=args
 		for k in sorted(args.keys(),key=self.__sort_attr_arg_keys):
-			setattr(self,k,args[k])
+			if k in self._init_args:
+				setattr(self,k,args[k])
 		self._init_args={}
 		if defarg: self._init_tuple(*defarg)
 	@classmethod
@@ -279,9 +280,13 @@ class Attr(cached_property):
 			if name.endswith("_size"):
 				try: return set_get_attr(instance,name,len(getattr(instance,name[:-len("_size")])))
 				except AttributeError: pass
-			try: return set_get_attr(instance, name, self.default)
-			except AttributeError:
-				raise _AttrErr(AttributeError("No default value for field attr %s.%s"%(instance.__class__.__name__,name)),sys.exc_info()[2])
+			try: init_val=instance._init_args.pop(name)
+			except (AttributeError,KeyError):
+				try: return set_get_attr(instance, name, self.default)
+				except AttributeError:
+					raise _AttrErr(AttributeError("No default value for field attr %s.%s"%(instance.__class__.__name__,name)),sys.exc_info()[2])
+			else:
+				return set_get_attr(instance, name, init_val)
 	def __get__(self, instance, owner):
 		if instance is None: return self
 		try: val=self.get_value(instance)
