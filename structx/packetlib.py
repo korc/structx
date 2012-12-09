@@ -7,6 +7,7 @@ from functools import wraps
 from warnings import warn
 from types import MemberDescriptorType
 import os
+import mmap
 
 max_uint=(sys.maxint<<1)+1
 
@@ -432,7 +433,7 @@ class BasePacketClass(DynamicAttrClass):
 
 	_repr function can be overwritten to add info in __repr__
 	"""
-	__slots__=['_fields_','_data','_data_offset','_attr_offsets','_data_size']
+	__slots__=['_fields_','_data','_data_offset','_attr_offsets','_data_size', '_mmap']
 	class __metaclass__(DynamicAttrClass.__metaclass__):
 		def __init__(self, cls_name, bases, cls_dict):
 			try: fields=cls_dict["_fields_"]
@@ -457,7 +458,15 @@ class BasePacketClass(DynamicAttrClass):
 				attr_val=getattr(data,attr_name)
 				if isinstance(attr_val,(BaseAttrClass,BasePacketClass)): attr_val=attr_val.__class__(attr_val)
 				setattr(self,attr_name,attr_val)
-	def _init_new(self,data): return self._init_tuple(data,0,len(data))
+	def _init_new(self,data):
+		if isinstance(data, file):
+			self._mmap=mmap.mmap(data.fileno(), 0, access=mmap.ACCESS_READ)
+			data=self._mmap
+		return self._init_tuple(data,0,len(data))
+	def __del__(self):
+		try: _mmap=self._mmap
+		except AttributeError: pass
+		else: _mmap.close()
 	def _init_parse(self,data,data_offset,data_size):
 		self._fields_.validate(data,data_offset)
 		self._data=data
