@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
 from structx.packetlib import Byte, StringSZ, Enum, ShortBE, BasePacketClass, AttrList,\
-	Int, DynamicAttrClass, ArrayAttr, Short, IntBE, Flags
+	Int, DynamicAttrClass, ArrayAttr, Short, IntBE, Flags, Quad
 import random
 from warnings import warn
 import struct
@@ -178,6 +178,38 @@ class PCapFile(BasePacketClass):
 	_fields_=AttrList(
 		('magic', Int, 0xa1b2c3d4), ('major', Short, 2), ('minor', Short, 4), ('thiszone', Int, 0), ('sigfigs', Int, 0), ('snaplen', Int), ('network', PCapNetwork, 1),
 		('data', choose_pcap_packet))
+
+class PCapNGBlockOption(BasePacketClass):
+	__slots__=[]
+	_fields_=AttrList(("code", Enum.mk("end comment", Short)), ("data_size", Short), ("data", StringSZ), ("datapad", StringSZ))
+	def get_datapad_size(self): return (4-int(self.data_size)%4)%4
+
+class PCapNGBlock(BasePacketClass):
+	__slots__=[]
+	class EBPData(BasePacketClass):
+		__slots__=[]
+		_fields_=AttrList(('if_id', Int), ("ts_high", Int), ("ts_low", Int), ("data_size", Int), ("pkt_len", Int), ("data", StringSZ), ("datapad", StringSZ), ("options", StringSZ))
+		def get_datapad_size(self):
+			mod=int(self.data_size)%4
+			return 4-mod if mod else 0
+	class SHBData(BasePacketClass):
+		__slots__=[]
+		_fields_=AttrList(('bom', Int), ('v_maj', Short), ('v_min', Short), ('sect_len', Quad), ('options', ArrayAttr._c(dtype=PCapNGBlockOption, end="\0\0\0\0")))
+	class IDBData(BasePacketClass):
+		__slots__=[]
+		_fields_=AttrList(('linktype', PCapNetwork), ('rsvd', Short, 0), ('snaplen', Int), ('options', ArrayAttr._c(dtype=PCapNGBlockOption, end="\0\0\0\0")))
+	_fields_=AttrList(
+		("type", Enum.mk("? IDB PB SPB NRB ISB EBP", Int, SHB=0x0A0D0D0A)),
+		("block_len", Int), ("data", [
+				({"type":0x0a0d0d0a}, SHBData), ({"type":1}, IDBData), ({"type":6},EBPData), ({},StringSZ)
+			]), ("block_len2", Int))
+	def get_data_size(self):
+		return self.block_len-12
+	def _repr(self): return self.type.name
+
+class PCapNGFile(BasePacketClass):
+	__slots__=[]
+	_fields_=AttrList(("blocks",ArrayAttr._c(dtype=PCapNGBlock)))
 
 def arp_spoof(ethsock,ip,mac=None):
 	if mac is None: mac=ethsock.sock.mac
