@@ -23,7 +23,7 @@ class IPAddr(StringSZ):
 	def _repr(self): return '.'.join(["%d"%(ord(x)) for x in self.value])
 
 ArpOp=Enum.mk("? REQ REPL",ShortBE,"ArpOp")
-EType=Enum.mk("",ShortBE,"EType",ARP=0x806,IP=0x800)
+EType=Enum.mk("",ShortBE,"EType",ARP=0x806,IP=0x800, VLanQ=0x8100)
 
 class ARP(BasePacketClass):
 	_fields_=AttrList(
@@ -136,11 +136,21 @@ class Ether(BasePacketClass):
 			if self.type==0x0800: return IPv4
 			try: return StringSZ._c(size=self._data_size-self._offsetof("data"))
 			except AttributeError: return StringSZ
+		elif self.type==0x8100: return EtherVlanQ
 		else: return LLC._c(size=int(self.type))
 	_fields_=AttrList(("dst",MacAddr),("src",MacAddr),("type",EType),("data",[({"type":0x0806},ARP),({},choose_data)]),("trailer",StringSZ,""))
 	__slots__=_fields_.keys()
 	def get_type(self): return len(self.data)
 	def _repr(self): return "%s -> %s (0x%x)"%(self.src._repr(),self.dst._repr(),self.type)
+
+class EtherVlanQ(BasePacketClass):
+	__slots__=[]
+	_fields_=AttrList(("vlan",ShortBE),("type",EType),("data",Ether._fields_["data"].type))
+	def _repr(self): return "id=%s"%(self.vlan_id)
+	@property
+	def vlan_id(self): return self.vlan[0:12]
+	@vlan_id.setter
+	def vlan_id(self, v): self.vlan[0:12]=int(v)
 
 class PktHandler(DynamicAttrClass):
 	pktcls=Ether
@@ -189,6 +199,7 @@ class PCapNGBlock(BasePacketClass):
 	class EBPData(BasePacketClass):
 		__slots__=[]
 		_fields_=AttrList(('if_id', Int), ("ts_high", Int), ("ts_low", Int), ("data_size", Int), ("pkt_len", Int), ("data", StringSZ), ("datapad", StringSZ), ("options", StringSZ))
+		def get_ether(self): return Ether(str(self.data))
 		def get_datapad_size(self):
 			mod=int(self.data_size)%4
 			return 4-mod if mod else 0
