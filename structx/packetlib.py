@@ -590,7 +590,9 @@ class IntVal(BaseAttrClass):
 	"""
 	__slots__=['value','size','fmt']
 	def _init_dup(self,pkt): self.value=int(pkt.value)
-	def _init_new(self,data): self.value=data
+	@cached_property
+	def maxval(self): return (1<<(self.size*8))-1
+	def _init_new(self,data): self.value=data&self.maxval
 	def _init_parse(self,data,data_offset,data_size):
 		try: self.value=self.fmt.unpack_from(data,data_offset)[0]
 		except struct.error,e:
