@@ -573,6 +573,14 @@ class BaseAttrClass(DynamicAttrClass):
 	def _repr(self): return ''
 	def __repr__(self): return '<%s@%x %s>'%(clsname(self),hashx(self),self._repr())
 	def __eq__(self,other): return str(self)==str(other)
+	def __add__(self, other):
+		if isinstance(other, (str)): return str(self)+other
+		elif isinstance(other, (BaseAttrClass, BasePacketClass)): return str(self)+str(other)
+		return NotImplemented
+	def __radd__(self, other):
+		if isinstance(other, str): return other+str(self)
+		elif isinstance(other, (BaseAttrClass, BasePacketClass)): return str(other)+str(self)
+		return NotImplemented
 	def _init_dup(self,basepkt): raise NotImplementedError,"%s needs to implement _init_dup"%(clsname(self))
 
 class IntVal(BaseAttrClass):
@@ -593,9 +601,13 @@ class IntVal(BaseAttrClass):
 	def __mul__(self,other): return type(other)(self.value*other)
 	def __cmp__(self,other): return cmp(self.value,int(other))
 	def __nonzero__(self): return self.value!=0
-	def __add__(self,other): return type(other)(self.value+other)
-	def __radd__(self,other): return type(other)(other+self.value)
-	def __sub__(self,other): return type(other)(self.value-other)
+	def __add__(self,other):
+		try: return type(self)(self.value+int(other))
+		except (ValueError,TypeError): return BaseAttrClass.__add__(self, other)
+	def __radd__(self,other):
+		try: return type(other)(self.value+int(other))
+		except (ValueError,TypeError): return BaseAttrClass.__radd__(self, other)
+	def __sub__(self,other): return type(self)(self.value-other)
 	def __rsub__(self,other): return type(other)(other-self.value)
 	def __lshift__(self,shift): return self.value<<shift
 	def __rshift__(self,shift): return self.value>>shift
