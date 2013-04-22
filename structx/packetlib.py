@@ -299,7 +299,11 @@ class Attr(cached_property):
 		atype=self.type
 		if isinstance(atype,list):
 			for test,res in atype:
-				if instance.satisfies(**test):
+				if callable(test):
+					if test(instance, *type_args):
+						atype_new=res
+						break
+				elif instance.satisfies(**test):
 					atype_new=res
 					break
 			atype=atype_new
