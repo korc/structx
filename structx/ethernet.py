@@ -56,7 +56,9 @@ def calc_cksum16(data):
 
 class UDP(BasePacketClass):
 	__slots__=['_parent_ip']
-	_fields_=AttrList(('sport',ShortBE),('dport',ShortBE),('length',ShortBE),('cksum',ShortBE),('data',StringSZ))
+	_fields_=AttrList(('sport',ShortBE),('dport',ShortBE),
+		('length',ShortBE),('cksum',ShortBE),
+		('data',[({},StringSZ)]))
 	def get_data_size(self):
 		return int(self.length-8)
 	def get_length(self):
