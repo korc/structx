@@ -559,7 +559,21 @@ class BasePacketClass(DynamicAttrClass):
 	def pprint(self,*args,**kwargs):
 		import pprint
 		pprint.pprint(self.as_structure(),*args,**kwargs)
-
+	def self_test(self, indent=""):
+		data=self._data
+		ofs=self._data_offset
+		if str(self)==data[ofs:ofs+len(self)]:
+			return True
+		print "%s%r fails"%(indent, self)
+		for attr_name in self.keys():
+			print "%s%s:"%(indent,attr_name),
+			attr=getattr(self, attr_name)
+			try: check_func=attr.self_test
+			except AttributeError:
+				print "can't check"
+			else:
+				if check_func(indent=indent+" "):
+					print "ok"
 
 class BaseAttrClass(DynamicAttrClass):
 	"""
@@ -1033,3 +1047,18 @@ class ArrayAttr(BaseAttrClass):
 			except AttributeError: ret.append(item)
 			else: ret.append(s())
 		return ret
+	def self_test(self, indent=""):
+		i=0
+		data=self._data
+		ofs=self._data_offset
+		if str(self)==data[ofs:ofs+len(self)]:
+			return True
+		print "%s%r fails"%(indent, self)
+		for item in self:
+			print "%s[%d](%s)"%(indent, i, type(item).__name__),
+			i+=1
+			try: check_func=item.self_test
+			except AttributeError: print "can't check"
+			else:
+				if check_func(indent=indent+" "):
+					print "ok"
