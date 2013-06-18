@@ -927,7 +927,7 @@ class ArrayAttr(BaseAttrClass):
 			return getattr(self,"_data_offset",0)
 		if idx not in self._offsets:
 			dtype_size=get_cls_size(self.dtype)
-			if dtype_size is not None: offset=dtype_size*idx
+			if dtype_size is not None: offset=dtype_size*idx+getattr(self, "_data_offset", 0)
 			else: offset=self._offsetof(idx-1)+self._sizeof(idx-1)
 			self._offsets[idx]=offset
 		return self._offsets[idx]
