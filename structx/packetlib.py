@@ -281,6 +281,13 @@ class Attr(cached_property):
 			if name.endswith("_size"):
 				try: return set_get_attr(instance,name,len(getattr(instance,name[:-len("_size")])))
 				except AttributeError: pass
+			elif name.endswith("_count"):
+				try: counted_attr=getattr(instance,name[:-len("_count")])
+				except AttributeError: pass
+				else:
+					if isinstance(counted_attr, ArrayAttr):
+						try: return set_get_attr(instance,name, counted_attr.count)
+						except AttributeError: pass
 			try: init_val=instance._init_args.pop(name)
 			except (AttributeError,KeyError):
 				try: return set_get_attr(instance, name, self.default)
