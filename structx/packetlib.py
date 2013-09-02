@@ -978,6 +978,7 @@ class ArrayAttr(BaseAttrClass):
 		try: return self._count
 		except AttributeError: pass
 		if not hasattr(self,"_data"):
+			if not self._dcache: return 0
 			return max(self._dcache)+1
 		data_size=getattr(self,"_data_size",None)
 		dtype_size=get_cls_size(self.dtype)
